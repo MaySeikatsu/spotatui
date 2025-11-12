@@ -696,7 +696,7 @@ impl Network {
   async fn get_current_user_saved_tracks(&mut self, offset: Option<u32>) {
     match self
       .spotify
-      .current_user_saved_tracks(Some(self.large_search_limit), offset)
+      .current_user_saved_tracks_manual(None, Some(self.large_search_limit), offset)
       .await
     {
       Ok(saved_tracks) => {
@@ -887,10 +887,14 @@ impl Network {
     input_artist_name: String,
     country: Option<Country>,
   ) {
-    let albums = self.spotify.artist_albums(
+    // Convert Country to Market for rspotify 0.12 API
+    let market = country.map(Market::Country);
+
+    // Use artist_albums_manual for explicit pagination control
+    let albums = self.spotify.artist_albums_manual(
       artist_id.clone(),
       None,
-      country,
+      market,
       Some(self.large_search_limit),
       Some(0),
     );
@@ -904,7 +908,7 @@ impl Network {
     } else {
       input_artist_name
     };
-    let top_tracks = self.spotify.artist_top_tracks(artist_id.clone(), country);
+    let top_tracks = self.spotify.artist_top_tracks(artist_id.clone(), market);
     let related_artist = self.spotify.artist_related_artists(artist_id);
 
     if let Ok((albums, top_tracks, related_artist)) = try_join!(albums, top_tracks, related_artist)
@@ -915,7 +919,12 @@ impl Network {
         albums
           .items
           .iter()
-          .filter_map(|item| item.id.as_ref().map(|id| id.to_string()))
+          .filter_map(|item| {
+            item
+              .id
+              .as_ref()
+              .map(|id| AlbumId::from_id(id.id()).unwrap().into_static())
+          })
           .collect(),
       ));
 
@@ -937,15 +946,25 @@ impl Network {
     if let Some(album_id) = &album.id {
       match self
         .spotify
-        .album_tracks(album_id.clone(), Some(self.large_search_limit), Some(0))
+        .album_track_manual(
+          album_id.clone(),
+          None,
+          Some(self.large_search_limit),
+          Some(0),
+        )
         .await
       {
         Ok(tracks) => {
           let track_ids = tracks
             .items
             .iter()
-            .filter_map(|item| item.id.as_ref().map(|id| id.to_string()))
-            .collect::<Vec<String>>();
+            .filter_map(|item| {
+              item
+                .id
+                .as_ref()
+                .map(|id| TrackId::from_id(id.id()).unwrap().into_static())
+            })
+            .collect::<Vec<TrackId<'static>>>();
 
           let mut app = self.app.lock().await;
           app.selected_album_simplified = Some(SelectedAlbum {
@@ -1405,7 +1424,7 @@ impl Network {
   async fn get_current_user_playlists(&mut self) {
     let playlists = self
       .spotify
-      .current_user_playlists(Some(self.large_search_limit), None)
+      .current_user_playlists_manual(Some(self.large_search_limit), None)
       .await;
 
     match playlists {
@@ -1431,8 +1450,14 @@ impl Network {
         let track_ids = result
           .items
           .iter()
-          .filter_map(|item| item.track.id.as_ref().map(|id| id.to_string()))
-          .collect::<Vec<String>>();
+          .filter_map(|item| {
+            item
+              .track
+              .id
+              .as_ref()
+              .map(|id| TrackId::from_id(id.id()).unwrap().into_static())
+          })
+          .collect::<Vec<TrackId<'static>>>();
 
         self.current_user_saved_tracks_contains(track_ids).await;
 
