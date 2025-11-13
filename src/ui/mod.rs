@@ -19,6 +19,7 @@ use ratatui::{
 use rspotify::model::enums::RepeatState;
 use rspotify::model::show::ResumePoint;
 use rspotify::model::PlayableItem;
+use rspotify::prelude::Id;
 use util::{
   create_artist_string, display_track_progress, get_artist_highlight_state, get_color,
   get_percentage_width, get_search_results_highlight_state, get_track_progress_percentage,
@@ -362,8 +363,8 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .clone()
       .and_then(|context| {
         context.item.and_then(|item| match item {
-          PlayableItem::Track(track) => track.id,
-          PlayableItem::Episode(episode) => Some(episode.id),
+          PlayableItem::Track(track) => track.id.map(|id| id.id().to_string()),
+          PlayableItem::Episode(episode) => Some(episode.id.id().to_string()),
         })
       })
       .unwrap_or_else(|| "".to_string());
@@ -374,7 +375,11 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .iter()
         .map(|item| {
           let mut song_name = "".to_string();
-          let id = item.clone().id.unwrap_or_else(|| "".to_string());
+          let id = item
+            .clone()
+            .id
+            .map(|id| id.id().to_string())
+            .unwrap_or_else(|| "".to_string());
           if currently_playing_id == id {
             song_name += "▶ "
           }
@@ -406,7 +411,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .iter()
         .map(|item| {
           let mut artist = String::new();
-          if app.followed_artist_ids_set.contains(&item.id.to_owned()) {
+          if app.followed_artist_ids_set.contains(item.id.id()) {
             artist.push_str(&app.user_config.padded_liked_icon());
           }
           artist.push_str(&item.name.to_owned());
@@ -440,7 +445,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         .map(|item| {
           let mut album_artist = String::new();
           if let Some(album_id) = &item.id {
-            if app.saved_album_ids_set.contains(&album_id.to_owned()) {
+            if app.saved_album_ids_set.contains(album_id.id()) {
               album_artist.push_str(&app.user_config.padded_liked_icon());
             }
           }
@@ -543,7 +548,7 @@ pub fn draw_artist_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .artists
     .iter()
     .map(|item| TableItem {
-      id: item.id.clone(),
+      id: item.id.id().to_string(),
       format: vec![item.name.to_owned()],
     })
     .collect::<Vec<TableItem>>();
@@ -588,7 +593,7 @@ pub fn draw_podcast_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .items
       .iter()
       .map(|show_page| TableItem {
-        id: show_page.show.id.to_owned(),
+        id: show_page.show.id.id().to_string(),
         format: vec![
           show_page.show.name.to_owned(),
           show_page.show.publisher.to_owned(),
@@ -657,13 +662,17 @@ pub fn draw_album_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
             .items
             .iter()
             .map(|item| TableItem {
-              id: item.id.clone().unwrap_or_else(|| "".to_string()),
+              id: item
+                .id
+                .as_ref()
+                .map(|id| id.id().to_string())
+                .unwrap_or_else(|| "".to_string()),
               format: vec![
                 "".to_string(),
                 item.track_number.to_string(),
                 item.name.to_owned(),
                 create_artist_string(&item.artists),
-                millis_to_minutes(item.duration.as_millis()),
+                millis_to_minutes(item.duration.num_milliseconds() as u128),
               ],
             })
             .collect::<Vec<TableItem>>(),
@@ -683,13 +692,17 @@ pub fn draw_album_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
           .items
           .iter()
           .map(|item| TableItem {
-            id: item.id.clone().unwrap_or_else(|| "".to_string()),
+            id: item
+              .id
+              .as_ref()
+              .map(|id| id.id().to_string())
+              .unwrap_or_else(|| "".to_string()),
             format: vec![
               "".to_string(),
               item.track_number.to_string(),
               item.name.to_owned(),
               create_artist_string(&item.artists),
-              millis_to_minutes(item.duration.as_millis()),
+              millis_to_minutes(item.duration.num_milliseconds() as u128),
             ],
           })
           .collect::<Vec<TableItem>>(),
@@ -760,13 +773,17 @@ pub fn draw_recommendations_table(f: &mut Frame<'_>, app: &App, layout_chunk: Re
     .tracks
     .iter()
     .map(|item| TableItem {
-      id: item.id.clone().unwrap_or_else(|| "".to_string()),
+      id: item
+        .id
+        .as_ref()
+        .map(|id| id.id().to_string())
+        .unwrap_or_else(|| "".to_string()),
       format: vec![
         "".to_string(),
         item.name.to_owned(),
         create_artist_string(&item.artists),
         item.album.name.to_owned(),
-        millis_to_minutes(item.duration.as_millis()),
+        millis_to_minutes(item.duration.num_milliseconds() as u128),
       ],
     })
     .collect::<Vec<TableItem>>();
@@ -836,13 +853,17 @@ pub fn draw_song_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .tracks
     .iter()
     .map(|item| TableItem {
-      id: item.id.clone().unwrap_or_else(|| "".to_string()),
+      id: item
+        .id
+        .as_ref()
+        .map(|id| id.id().to_string())
+        .unwrap_or_else(|| "".to_string()),
       format: vec![
         "".to_string(),
         item.name.to_owned(),
         create_artist_string(&item.artists),
         item.album.name.to_owned(),
-        millis_to_minutes(item.duration.as_millis()),
+        millis_to_minutes(item.duration.num_milliseconds() as u128),
       ],
     })
     .collect::<Vec<TableItem>>();
@@ -920,7 +941,7 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         current_playback_context.device.name,
         shuffle_text,
         repeat_text,
-        current_playback_context.device.volume_percent
+        current_playback_context.device.volume_percent.unwrap_or(0)
       );
 
       let current_route = app.get_current_route();
@@ -944,13 +965,13 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
           track
             .id
             .as_ref()
-            .map(|id| id.to_string())
+            .map(|id| id.id().to_string())
             .unwrap_or_default(),
           track.name.to_owned(),
           track.duration,
         ),
         PlayableItem::Episode(episode) => (
-          episode.id.to_string(),
+          episode.id.id().to_string(),
           episode.name.to_owned(),
           episode.duration,
         ),
@@ -989,9 +1010,10 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         None => app.song_progress_ms,
       };
 
-      let perc = get_track_progress_percentage(progress_ms, duration);
+      let duration_std = std::time::Duration::from_millis(duration.num_milliseconds() as u64);
+      let perc = get_track_progress_percentage(progress_ms, duration_std);
 
-      let song_progress_label = display_track_progress(progress_ms, duration);
+      let song_progress_label = display_track_progress(progress_ms, duration_std);
       let modifier = if app.user_config.behavior.enable_text_emphasis {
         Modifier::ITALIC | Modifier::BOLD
       } else {
@@ -1150,12 +1172,12 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         let mut name = String::new();
         if let Some(context) = &app.current_playback_context {
           let track_id = match &context.item {
-            Some(PlayableItem::Track(track)) => track.id.to_owned(),
-            Some(PlayableItem::Episode(episode)) => Some(episode.id.to_owned()),
+            Some(PlayableItem::Track(track)) => track.id.as_ref().map(|id| id.id().to_string()),
+            Some(PlayableItem::Episode(episode)) => Some(episode.id.id().to_string()),
             _ => None,
           };
 
-          if track_id == top_track.id {
+          if track_id == top_track.id.as_ref().map(|id| id.id().to_string()) {
             name.push_str("▶ ");
           }
         };
@@ -1181,7 +1203,7 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .map(|item| {
         let mut album_artist = String::new();
         if let Some(album_id) = &item.id {
-          if app.saved_album_ids_set.contains(&album_id.to_owned()) {
+          if app.saved_album_ids_set.contains(album_id.id()) {
             album_artist.push_str(&app.user_config.padded_liked_icon());
           }
         }
@@ -1210,7 +1232,7 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .iter()
       .map(|item| {
         let mut artist = String::new();
-        if app.followed_artist_ids_set.contains(&item.id.to_owned()) {
+        if app.followed_artist_ids_set.contains(item.id.id()) {
           artist.push_str(&app.user_config.padded_liked_icon());
         }
         artist.push_str(&item.name.to_owned());
@@ -1331,7 +1353,7 @@ pub fn draw_album_list(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .items
       .iter()
       .map(|album_page| TableItem {
-        id: album_page.album.id.to_owned(),
+        id: album_page.album.id.id().to_string(),
         format: vec![
           format!(
             "{}{}",
@@ -1408,17 +1430,17 @@ pub fn draw_show_episodes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
             },
             format!(
               "{} / {}",
-              millis_to_minutes(u128::from(resume_position)),
-              millis_to_minutes(episode.duration.as_millis())
+              millis_to_minutes(resume_position.num_milliseconds() as u128),
+              millis_to_minutes(episode.duration.num_milliseconds() as u128)
             ),
           ),
           None => (
             "".to_owned(),
-            millis_to_minutes(episode.duration.as_millis()),
+            millis_to_minutes(episode.duration.num_milliseconds() as u128),
           ),
         };
         TableItem {
-          id: episode.id.to_owned(),
+          id: episode.id.id().to_string(),
           format: vec![
             played_str,
             episode.release_date.to_owned(),
@@ -1479,7 +1501,7 @@ pub fn draw_made_for_you(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       .items
       .iter()
       .map(|playlist| TableItem {
-        id: playlist.id.to_owned(),
+        id: playlist.id.id().to_string(),
         format: vec![playlist.name.to_owned()],
       })
       .collect::<Vec<TableItem>>();
@@ -1544,12 +1566,17 @@ pub fn draw_recently_played_table(f: &mut Frame<'_>, app: &App, layout_chunk: Re
       .items
       .iter()
       .map(|item| TableItem {
-        id: item.track.id.clone().unwrap_or_else(|| "".to_string()),
+        id: item
+          .track
+          .id
+          .as_ref()
+          .map(|id| id.id().to_string())
+          .unwrap_or_else(|| "".to_string()),
         format: vec![
           "".to_string(),
           item.track.name.to_owned(),
           create_artist_string(&item.track.artists),
-          millis_to_minutes(item.track.duration.as_millis()),
+          millis_to_minutes(item.track.duration.num_milliseconds() as u128),
         ],
       })
       .collect::<Vec<TableItem>>();
@@ -1691,10 +1718,19 @@ fn draw_table(
 
   let track_playing_index = app.current_playback_context.to_owned().and_then(|ctx| {
     ctx.item.and_then(|item| match item {
-      PlayableItem::Track(track) => items
-        .iter()
-        .position(|item| track.id.to_owned().map(|id| id == item.id).unwrap_or(false)),
-      PlayableItem::Episode(episode) => items.iter().position(|item| episode.id == item.id),
+      PlayableItem::Track(track) => {
+        let track_id_str = track.id.map(|id| id.id().to_string());
+        items.iter().position(|item| {
+          track_id_str
+            .as_ref()
+            .map(|id| id == &item.id)
+            .unwrap_or(false)
+        })
+      }
+      PlayableItem::Episode(episode) => {
+        let episode_id_str = episode.id.id().to_string();
+        items.iter().position(|item| episode_id_str == item.id)
+      }
     })
   });
 
