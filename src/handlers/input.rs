@@ -3,6 +3,7 @@ extern crate unicode_width;
 use super::super::app::{ActiveBlock, App, RouteId};
 use crate::event::Key;
 use crate::network::IoEvent;
+use rspotify::model::idtypes::{AlbumId, PlaylistId, ShowId, TrackId};
 use std::convert::TryInto;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -130,8 +131,10 @@ fn spotify_resource_id(base: &str, uri: &str, sep: &str, resource_type: &str) ->
 fn attempt_process_uri(app: &mut App, input: &str, base: &str, sep: &str) -> bool {
   let (album_id, matched) = spotify_resource_id(base, input, sep, "album");
   if matched {
-    app.dispatch(IoEvent::GetAlbum(album_id));
-    return true;
+    if let Ok(album_id) = AlbumId::from_id(&album_id) {
+      app.dispatch(IoEvent::GetAlbum(album_id.into_static()));
+      return true;
+    }
   }
 
   let (artist_id, matched) = spotify_resource_id(base, input, sep, "artist");
@@ -143,20 +146,26 @@ fn attempt_process_uri(app: &mut App, input: &str, base: &str, sep: &str) -> boo
 
   let (track_id, matched) = spotify_resource_id(base, input, sep, "track");
   if matched {
-    app.dispatch(IoEvent::GetAlbumForTrack(track_id));
-    return true;
+    if let Ok(track_id) = TrackId::from_id(&track_id) {
+      app.dispatch(IoEvent::GetAlbumForTrack(track_id.into_static()));
+      return true;
+    }
   }
 
   let (playlist_id, matched) = spotify_resource_id(base, input, sep, "playlist");
   if matched {
-    app.dispatch(IoEvent::GetPlaylistItems(playlist_id, 0));
-    return true;
+    if let Ok(playlist_id) = PlaylistId::from_id(&playlist_id) {
+      app.dispatch(IoEvent::GetPlaylistItems(playlist_id.into_static(), 0));
+      return true;
+    }
   }
 
   let (show_id, matched) = spotify_resource_id(base, input, sep, "show");
   if matched {
-    app.dispatch(IoEvent::GetShow(show_id));
-    return true;
+    if let Ok(show_id) = ShowId::from_id(&show_id) {
+      app.dispatch(IoEvent::GetShow(show_id.into_static()));
+      return true;
+    }
   }
 
   false
