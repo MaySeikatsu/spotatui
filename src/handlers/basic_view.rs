@@ -1,5 +1,5 @@
 use crate::{app::App, event::Key, network::IoEvent};
-use rspotify::model::{context::CurrentPlaybackContext, PlayableItem};
+use rspotify::model::{context::CurrentPlaybackContext, PlayableItem, PlayableId};
 
 pub fn handler(key: Key, app: &mut App) {
   if let Key::Char('s') = key {
@@ -10,11 +10,11 @@ pub fn handler(key: Key, app: &mut App) {
       match item {
         PlayableItem::Track(track) => {
           if let Some(track_id) = track.id {
-            app.dispatch(IoEvent::ToggleSaveTrack(track_id));
+            app.dispatch(IoEvent::ToggleSaveTrack(PlayableId::Track(track_id.into_static())));
           }
         }
         PlayableItem::Episode(episode) => {
-          app.dispatch(IoEvent::ToggleSaveTrack(episode.id));
+          app.dispatch(IoEvent::ToggleSaveTrack(PlayableId::Episode(episode.id.into_static())));
         }
       };
     };
