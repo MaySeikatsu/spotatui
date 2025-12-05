@@ -1,5 +1,5 @@
 use crate::event::Key;
-use crossterm::event;
+use crossterm::event::{self, KeyEventKind};
 use std::{sync::mpsc, thread, time::Duration};
 
 #[derive(Debug, Clone, Copy)]
@@ -56,9 +56,13 @@ impl Events {
         // poll for tick rate duration, if no event, sent tick event.
         if event::poll(config.tick_rate).unwrap() {
           if let event::Event::Key(key) = event::read().unwrap() {
-            let key = Key::from(key);
-
-            event_tx.send(Event::Input(key)).unwrap();
+            // Only process key press events, not release or repeat.
+            // This fixes duplicate key events on Windows where both
+            // Press and Release events are sent for each key press.
+            if key.kind == KeyEventKind::Press {
+              let key = Key::from(key);
+              event_tx.send(Event::Input(key)).unwrap();
+            }
           }
         }
 

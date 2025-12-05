@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.27.1] - 2025-12-05
+
+### Fixed
+
+- Fix duplicate key events on Windows by filtering for `KeyEventKind::Press` only
+
 ## [0.26.0] - 2025-12-05
 
 ### Changed
