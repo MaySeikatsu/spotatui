@@ -143,8 +143,8 @@ pub fn handler(key: Key, app: &mut App) {
     }
     // Scroll down
     k if k == app.user_config.keys.next_page => {
-      match &app.track_table.context {
-        Some(context) => match context {
+      if let Some(context) = &app.track_table.context {
+        match context {
           TrackTableContext::MyPlaylists => {
             if let (Some(playlists), Some(selected_playlist_index)) =
               (&app.playlists, &app.selected_playlist_index)
@@ -190,14 +190,13 @@ pub fn handler(key: Key, app: &mut App) {
               }
             }
           }
-        },
-        None => {}
+        }
       };
     }
     // Scroll up
     k if k == app.user_config.keys.previous_page => {
-      match &app.track_table.context {
-        Some(context) => match context {
+      if let Some(context) = &app.track_table.context {
+        match context {
           TrackTableContext::MyPlaylists => {
             if let (Some(playlists), Some(selected_playlist_index)) =
               (&app.playlists, &app.selected_playlist_index)
@@ -239,8 +238,7 @@ pub fn handler(key: Key, app: &mut App) {
               ));
             }
           }
-        },
-        None => {}
+        }
       };
     }
     Key::Char('s') => handle_save_track_event(app),
@@ -372,8 +370,8 @@ fn handle_recommended_tracks(app: &mut App) {
 }
 
 fn jump_to_end(app: &mut App) {
-  match &app.track_table.context {
-    Some(context) => match context {
+  if let Some(context) = &app.track_table.context {
+    match context {
       TrackTableContext::MyPlaylists => {
         if let (Some(playlists), Some(selected_playlist_index)) =
           (&app.playlists, &app.selected_playlist_index)
@@ -394,8 +392,7 @@ fn jump_to_end(app: &mut App) {
       TrackTableContext::AlbumSearch => {}
       TrackTableContext::PlaylistSearch => {}
       TrackTableContext::MadeForYou => {}
-    },
-    None => {}
+    }
   }
 }
 
@@ -405,8 +402,8 @@ fn on_enter(app: &mut App) {
     selected_index,
     tracks,
   } = &app.track_table;
-  match &context {
-    Some(context) => match context {
+  if let Some(context) = &context {
+    match context {
       TrackTableContext::MyPlaylists => {
         if let Some(track) = tracks.get(*selected_index) {
           // Get the track ID to play
@@ -513,8 +510,7 @@ fn on_enter(app: &mut App) {
           ));
         }
       }
-    },
-    None => {}
+    }
   };
 }
 
@@ -524,8 +520,8 @@ fn on_queue(app: &mut App) {
     selected_index,
     tracks,
   } = &app.track_table;
-  match &context {
-    Some(context) => match context {
+  if let Some(context) = &context {
+    match context {
       TrackTableContext::MyPlaylists => {
         if let Some(track) = tracks.get(*selected_index) {
           if let Some(playable_id) = track_playable_id(track.id.clone()) {
@@ -569,14 +565,13 @@ fn on_queue(app: &mut App) {
           }
         }
       }
-    },
-    None => {}
+    }
   };
 }
 
 fn jump_to_start(app: &mut App) {
-  match &app.track_table.context {
-    Some(context) => match context {
+  if let Some(context) = &app.track_table.context {
+    match context {
       TrackTableContext::MyPlaylists => {
         if let (Some(playlists), Some(selected_playlist_index)) =
           (&app.playlists, &app.selected_playlist_index)
@@ -593,8 +588,7 @@ fn jump_to_start(app: &mut App) {
       TrackTableContext::AlbumSearch => {}
       TrackTableContext::PlaylistSearch => {}
       TrackTableContext::MadeForYou => {}
-    },
-    None => {}
+    }
   }
 }
 
