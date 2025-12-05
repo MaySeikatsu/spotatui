@@ -205,6 +205,9 @@ pub fn draw_main_layout(f: &mut Frame<'_>, app: &App) {
 
   // Possibly draw confirm dialog
   draw_dialog(f, app);
+
+  // Draw update notification if available (on top of everything)
+  draw_update_notification(f, app);
 }
 
 pub fn draw_routes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
@@ -1817,4 +1820,45 @@ fn draw_table(
     )
     .style(Style::default().fg(app.user_config.theme.text));
   f.render_widget(table, layout_chunk);
+}
+
+fn draw_update_notification(f: &mut Frame<'_>, app: &App) {
+  if let Some(update_info) = &app.update_available {
+    // Auto-dismiss after 15 seconds
+    if let Some(shown_at) = app.update_notification_shown_at {
+      if shown_at.elapsed().as_secs() > 15 {
+        return;
+      }
+    }
+
+    let bounds = f.size();
+    let width = std::cmp::min(bounds.width - 4, 55);
+    let height = 3;
+    let left = (bounds.width - width) / 2;
+    let top = 1;
+
+    let rect = Rect::new(left, top, width, height);
+
+    f.render_widget(Clear, rect);
+
+    let text = format!(
+      " 🎵 Update available: v{} → v{} | Run: spotatui update -i ",
+      update_info.current_version, update_info.latest_version
+    );
+
+    let notification = Paragraph::new(text)
+      .style(
+        Style::default()
+          .fg(app.user_config.theme.text)
+          .bg(app.user_config.theme.active),
+      )
+      .alignment(Alignment::Center)
+      .block(
+        Block::default()
+          .borders(Borders::ALL)
+          .border_style(Style::default().fg(app.user_config.theme.active)),
+      );
+
+    f.render_widget(notification, rect);
+  }
 }

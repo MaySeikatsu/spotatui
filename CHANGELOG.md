@@ -19,6 +19,7 @@
 ### Added
 
 - Add `spotatui update` command for self-updating from GitHub releases
+- Add automatic update check on startup with notification banner (auto-dismisses after 15 seconds)
 - Add comprehensive Copilot instructions documentation (`.github/copilot-instructions.md`)
 - Updated GitHub Actions workflow for automated cross-platform releases
 

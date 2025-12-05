@@ -1,4 +1,5 @@
 use super::user_config::UserConfig;
+use crate::cli::UpdateInfo;
 use crate::network::IoEvent;
 use anyhow::anyhow;
 use ratatui::layout::Rect;
@@ -326,6 +327,8 @@ pub struct App {
   pub spotify_token_expiry: SystemTime,
   pub dialog: Option<String>,
   pub confirm: bool,
+  pub update_available: Option<UpdateInfo>,
+  pub update_notification_shown_at: Option<Instant>,
 }
 
 impl Default for App {
@@ -413,6 +416,8 @@ impl Default for App {
       spotify_token_expiry: SystemTime::now(),
       dialog: None,
       confirm: false,
+      update_available: None,
+      update_notification_shown_at: None,
     }
   }
 }

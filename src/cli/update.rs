@@ -1,6 +1,39 @@
 use anyhow::Result;
 use self_update::cargo_crate_version;
 
+/// Information about an available update
+#[derive(Clone, Debug)]
+pub struct UpdateInfo {
+  pub current_version: String,
+  pub latest_version: String,
+}
+
+/// Check for updates in the background (non-blocking)
+/// Returns Some(UpdateInfo) if an update is available, None if up to date
+pub fn check_for_update_silent() -> Option<UpdateInfo> {
+  let current_version = cargo_crate_version!();
+
+  let status = self_update::backends::github::Update::configure()
+    .repo_owner("LargeModGames")
+    .repo_name("spotatui")
+    .bin_name("spotatui")
+    .current_version(current_version)
+    .build()
+    .ok()?;
+
+  let latest = status.get_latest_release().ok()?;
+  let latest_version = latest.version.trim_start_matches('v').to_string();
+
+  if latest_version != current_version {
+    Some(UpdateInfo {
+      current_version: current_version.to_string(),
+      latest_version,
+    })
+  } else {
+    None
+  }
+}
+
 /// Check for updates and optionally install the latest version
 pub fn check_for_update(do_update: bool) -> Result<()> {
   let current_version = cargo_crate_version!();

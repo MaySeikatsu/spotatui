@@ -382,6 +382,22 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
 
   let events = event::Events::new(user_config.behavior.tick_rate_milliseconds);
 
+  // Check for updates in background (non-blocking)
+  let app_clone = Arc::clone(app);
+  tokio::spawn(async move {
+    // Run update check in a blocking thread pool since self_update uses blocking I/O
+    let update_info = tokio::task::spawn_blocking(cli::check_for_update_silent)
+      .await
+      .ok()
+      .flatten();
+    if let Some(info) = update_info {
+      if let Ok(mut app) = app_clone.try_lock() {
+        app.update_available = Some(info);
+        app.update_notification_shown_at = Some(std::time::Instant::now());
+      }
+    }
+  });
+
   // play music on, if not send them to the device selection view
 
   let mut is_first_render = true;
