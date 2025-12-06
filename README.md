@@ -1,13 +1,14 @@
 # Spotatui
 
 > A Spotify client for the terminal written in Rust, powered by [Ratatui](https://github.com/ratatui-org/ratatui).
-> 
+>
 > **Note:** This is a fork of the original [spotify-tui](https://github.com/Rigellute/spotify-tui) by Rigellute, which is no longer maintained. This fork aims to keep the project alive with updated dependencies and fixes.
 
 
 
 [![Crates.io](https://img.shields.io/crates/v/spotatui.svg)](https://crates.io/crates/spotatui)
 [![Upstream](https://img.shields.io/badge/upstream-Rigellute%2Fspotify--tui-blue)](https://github.com/Rigellute/spotify-tui)
+[![Global Songs Played](https://img.shields.io/badge/dynamic/json?url=https://spotatui-counter.spotatui.workers.dev&query=count&label=songs%20played%20globally&color=1DB954)](https://github.com/LargeModGames/spotatui)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-94-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
@@ -19,7 +20,21 @@ A Spotify client for the terminal written in Rust.
 
 The terminal in the demo above is using the [Rigel theme](https://rigel.netlify.com/).
 
+## Privacy Notice
+
+**🔒 Anonymous Global Counter**: Spotatui includes an opt-in feature that contributes to a global counter showing how many songs have been played by all users worldwide. This feature:
+
+- **Is completely anonymous** - no personal information, song names, artists, or listening history is collected
+- **Only sends a simple increment** when a new song starts playing
+- **Is enabled by default** but can be opted out at any time
+- **Can be disabled** by setting `enable_global_song_count: false` in `~/.config/spotatui/config.yml`
+
+We respect your privacy. This is purely a fun community metric with zero tracking of individual users.
+
+---
+
 - [Spotatui](#spotatui)
+  - [Privacy Notice](#privacy-notice)
   - [Migrating from spotify-tui](#migrating-from-spotify-tui)
   - [Installation](#installation)
     - [Arch Linux (AUR)](#arch-linux-aur)
@@ -206,6 +221,9 @@ behavior:
   # Disables the responsive layout that makes the search bar smaller on bigger
   # screens and enforces a wide search bar
   enforce_wide_search_bar: false
+  # Contribute to the global song counter (completely anonymous, no PII collected)
+  # Set to false to opt out of contributing to the global counter
+  enable_global_song_count: true
   # Determines the text icon to display next to "liked" Spotify items, such as
   # liked songs and albums, or followed artists. Can be any length string.
   # These icons require a patched nerd font.
