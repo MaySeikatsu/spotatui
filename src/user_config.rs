@@ -213,6 +213,7 @@ pub struct BehaviorConfigString {
   pub enable_text_emphasis: Option<bool>,
   pub show_loading_indicator: Option<bool>,
   pub enforce_wide_search_bar: Option<bool>,
+  pub enable_global_song_count: Option<bool>,
   pub liked_icon: Option<String>,
   pub shuffle_icon: Option<String>,
   pub repeat_track_icon: Option<String>,
@@ -230,6 +231,7 @@ pub struct BehaviorConfig {
   pub enable_text_emphasis: bool,
   pub show_loading_indicator: bool,
   pub enforce_wide_search_bar: bool,
+  pub enable_global_song_count: bool,
   pub liked_icon: String,
   pub shuffle_icon: String,
   pub repeat_track_icon: String,
@@ -293,6 +295,7 @@ impl UserConfig {
         enable_text_emphasis: true,
         show_loading_indicator: true,
         enforce_wide_search_bar: false,
+        enable_global_song_count: true,
         liked_icon: "♥".to_string(),
         shuffle_icon: "🔀".to_string(),
         repeat_track_icon: "🔂".to_string(),
@@ -459,6 +462,10 @@ impl UserConfig {
 
     if let Some(set_window_title) = behavior_config.set_window_title {
       self.behavior.set_window_title = set_window_title;
+    }
+
+    if let Some(enable_global_song_count) = behavior_config.enable_global_song_count {
+      self.behavior.enable_global_song_count = enable_global_song_count;
     }
 
     Ok(())
