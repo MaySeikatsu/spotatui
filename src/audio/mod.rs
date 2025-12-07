@@ -11,13 +11,19 @@ mod analyzer;
 mod pipewire_capture;
 
 #[cfg(feature = "audio-viz-cpal")]
+#[allow(dead_code)]
 mod capture;
 
 // Re-export the appropriate capture manager based on platform
 #[cfg(all(feature = "audio-viz", target_os = "linux"))]
 pub use pipewire_capture::PipeWireCapture as AudioCaptureManager;
 
-#[cfg(feature = "audio-viz-cpal")]
+// On Linux with audio-viz, use cpal only if audio-viz is not enabled
+// This prevents conflict when --all-features is used
+#[cfg(all(
+  feature = "audio-viz-cpal",
+  not(all(feature = "audio-viz", target_os = "linux"))
+))]
 pub use capture::AudioCaptureManager;
 
 // Re-export SpectrumData
