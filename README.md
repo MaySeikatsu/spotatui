@@ -286,6 +286,7 @@ If you want to play tracks, Spotify requires that you have a Premium account.
 **Note:** As of November 2024, Spotify deprecated and removed access to certain API endpoints for new applications. The following features are included in this app but **will only work if your Spotify Developer application was created before November 27, 2024**:
 
 - **Audio Visualization** (press `v`): Now uses **local real-time FFT analysis** of your system audio. On Linux, this requires PipeWire. The visualization no longer depends on Spotify's deprecated Audio Analysis API.
+  > **Note:** The audio visualization is **system-wide** – it captures all audio playing on your system, not just Spotify. This means it will also react to YouTube videos, games, or any other audio source!
 - **Related Artists**: When viewing an artist page, the "Related Artists" section shows similar artists based on Spotify's recommendation algorithm. This feature **only works if your Spotify Developer application was created before November 27, 2024**.
 
 For more information, see [Spotify's announcement about API changes](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api).
