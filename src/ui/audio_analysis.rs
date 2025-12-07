@@ -47,10 +47,11 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
   // Check if we have spectrum data from local audio capture
   if let Some(ref spectrum) = app.spectrum_data {
     // Info panel with status
+    // Use ASCII-safe symbols instead of emojis for Windows compatibility
     let status_text = if app.audio_capture_active {
-      "🎵 Capturing audio"
+      "[>] Capturing audio"
     } else {
-      "⏸ Paused"
+      "[||] Paused"
     };
 
     let peak_text = format!("Peak: {:.0}%", spectrum.peak * 100.0);

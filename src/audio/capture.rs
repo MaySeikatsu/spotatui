@@ -20,10 +20,8 @@ impl AudioCaptureManager {
     // Try to find a loopback/monitor device
     let device = Self::find_loopback_device(&host)?;
 
-    // Log which device we're using (helpful for debugging)
-    if let Ok(name) = device.name() {
-      eprintln!("[audio-viz] Using monitor device: {}", name);
-    }
+    // Device name is now stored internally for debugging if needed
+    let _device_name = device.name().ok();
 
     // Get a compatible config that won't interfere with playback
     let config = Self::get_compatible_config(&device)?;
@@ -35,7 +33,6 @@ impl AudioCaptureManager {
 
     // Start the stream
     if stream.play().is_err() {
-      eprintln!("[audio-viz] Failed to start audio stream");
       return None;
     }
 
@@ -80,12 +77,10 @@ impl AudioCaptureManager {
       if let Ok(devices) = host.input_devices() {
         let mut monitors: Vec<Device> = Vec::new();
 
-        // Debug: list all available input devices
-        eprintln!("[audio-viz] Scanning available input devices...");
+        // Scan available input devices
 
         for device in devices {
           if let Ok(name) = device.name() {
-            eprintln!("[audio-viz]   Found: {}", name);
             let name_lower = name.to_lowercase();
             if name_lower.contains("monitor") {
               monitors.push(device);
@@ -93,12 +88,7 @@ impl AudioCaptureManager {
           }
         }
 
-        if monitors.is_empty() {
-          eprintln!("[audio-viz] No monitor devices found via ALSA.");
-          eprintln!(
-            "[audio-viz] Note: PipeWire monitor devices may not be visible to cpal's ALSA backend."
-          );
-        }
+        // If no monitors found, will fall through to default input device
 
         // Sort by priority: bluetooth first, then speakers, then anything else
         monitors.sort_by_key(|d| {
@@ -126,11 +116,6 @@ impl AudioCaptureManager {
       // route correctly, but may be the microphone on pure ALSA systems.
       // User can disable audio-viz feature if this causes issues.
       if let Some(device) = host.default_input_device() {
-        if let Ok(name) = device.name() {
-          eprintln!("[audio-viz] Falling back to default input device: {}", name);
-          eprintln!("[audio-viz] Warning: This may be a microphone. If audio issues occur,");
-          eprintln!("[audio-viz]          rebuild with: cargo build --no-default-features --features telemetry");
-        }
         return Some(device);
       }
 
@@ -204,8 +189,8 @@ impl AudioCaptureManager {
       }
     };
 
-    let error_callback = move |err: cpal::StreamError| {
-      eprintln!("[audio-viz] Audio stream error: {}", err);
+    let error_callback = move |_err: cpal::StreamError| {
+      // Silently deactivate on error to avoid corrupting TUI
       active_clone.store(false, Ordering::Relaxed);
     };
 

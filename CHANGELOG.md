@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1] - 2025-12-07
+
+### Fixed
+
+- Fix audio visualization UI rendering on Windows (replaced emoji icons with ASCII alternatives)
+- Remove debug output that was bleeding into TUI display on Windows
+
 ## [0.30.0] - 2025-12-07
 
 ### Added
