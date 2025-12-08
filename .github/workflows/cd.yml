@@ -119,7 +119,7 @@ jobs:
 
       - name: Install Alpine dependencies
         run: |
-          apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static alsa-lib-dev perl make gcc
+          apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static alsa-lib-dev alsa-lib-static perl make gcc
 
       - name: Build release binary
         run: |
