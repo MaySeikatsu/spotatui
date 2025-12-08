@@ -1,12 +1,12 @@
 [package]
-name = "spotatui"
+name = "Spotatui"
 description = "A Spotify client for the terminal written in Rust, powered by Ratatui"
 homepage = "https://github.com/LargeModGames/spotatui"
 documentation = "https://github.com/LargeModGames/spotatui"
 repository = "https://github.com/LargeModGames/spotatui"
 keywords = ["spotify", "tui", "cli", "terminal"]
 categories = ["command-line-utilities"]
-version = "0.31.0"
+version = "0.33.0"
 authors = ["LargeModGames <LargeModGames@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -37,12 +37,22 @@ openssl = { version = "0.10", optional = true }
 cpal = { version = "0.15", optional = true }
 realfft = { version = "3.4", optional = true }
 
+# Streaming dependencies (librespot)
+librespot-core = { version = "0.8", optional = true }
+librespot-connect = { version = "0.8", optional = true }
+librespot-oauth = { version = "0.8", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = { version = "0.9", optional = true }
+librespot-playback = { version = "0.8", optional = true, default-features = false, features = ["alsa-backend"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+librespot-playback = { version = "0.8", optional = true, default-features = false, features = ["rodio-backend"] }
 
 [features]
-default = ["telemetry"]
+default = ["telemetry", "streaming"]
 telemetry = ["reqwest", "reqwest/native-tls"]
+streaming = ["librespot-core", "librespot-playback", "librespot-connect", "librespot-oauth"]
 audio-viz = ["realfft", "pipewire"]
 audio-viz-cpal = ["realfft", "cpal"]  # Alternative for Windows/macOS or if pipewire issues
 

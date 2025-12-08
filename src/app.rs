@@ -140,6 +140,7 @@ pub enum ActiveBlock {
   BasicView,
   Dialog(DialogContext),
   UpdatePrompt,
+  Settings,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -162,6 +163,7 @@ pub enum RouteId {
   Recommendations,
   Dialog,
   UpdatePrompt,
+  Settings,
 }
 
 #[derive(Debug)]
@@ -266,18 +268,92 @@ pub struct SpectrumData {
   pub peak: f32,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub enum LyricsStatus {
+  #[default]
   NotStarted,
   Loading,
   Found,
   NotFound,
 }
 
-impl Default for LyricsStatus {
-  fn default() -> Self {
-    LyricsStatus::NotStarted
+/// Settings screen category tabs
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum SettingsCategory {
+  #[default]
+  Behavior,
+  Keybindings,
+  Theme,
+}
+
+impl SettingsCategory {
+  pub fn all() -> &'static [SettingsCategory] {
+    &[
+      SettingsCategory::Behavior,
+      SettingsCategory::Keybindings,
+      SettingsCategory::Theme,
+    ]
   }
+
+  pub fn name(&self) -> &'static str {
+    match self {
+      SettingsCategory::Behavior => "Behavior",
+      SettingsCategory::Keybindings => "Keybindings",
+      SettingsCategory::Theme => "Theme",
+    }
+  }
+
+  pub fn index(&self) -> usize {
+    match self {
+      SettingsCategory::Behavior => 0,
+      SettingsCategory::Keybindings => 1,
+      SettingsCategory::Theme => 2,
+    }
+  }
+
+  pub fn from_index(index: usize) -> Self {
+    match index {
+      0 => SettingsCategory::Behavior,
+      1 => SettingsCategory::Keybindings,
+      2 => SettingsCategory::Theme,
+      _ => SettingsCategory::Behavior,
+    }
+  }
+}
+
+/// Represents a setting's value type
+#[derive(Clone, PartialEq, Debug)]
+pub enum SettingValue {
+  Bool(bool),
+  Number(i64),
+  String(String),
+  Color(String),  // Stored as "R,G,B" or color name
+  Key(String),    // Key representation like "ctrl-s" or "a"
+  Preset(String), // Theme preset name - cycles through available presets
+}
+
+impl SettingValue {
+  #[allow(dead_code)]
+  pub fn display(&self) -> String {
+    match self {
+      SettingValue::Bool(v) => if *v { "On" } else { "Off" }.to_string(),
+      SettingValue::Number(v) => v.to_string(),
+      SettingValue::String(v) => v.clone(),
+      SettingValue::Color(v) => v.clone(),
+      SettingValue::Key(v) => v.clone(),
+      SettingValue::Preset(v) => v.clone(),
+    }
+  }
+}
+
+/// Represents a single configurable setting
+#[derive(Clone, Debug)]
+pub struct SettingItem {
+  pub id: String,   // e.g., "behavior.seek_milliseconds"
+  pub name: String, // e.g., "Seek Duration"
+  #[allow(dead_code)]
+  pub description: String, // e.g., "Milliseconds to skip when seeking" (for future tooltip)
+  pub value: SettingValue,
 }
 
 pub struct App {
@@ -355,6 +431,12 @@ pub struct App {
   pub update_prompt_acknowledged: bool,
   pub lyrics: Option<Vec<(u128, String)>>,
   pub lyrics_status: LyricsStatus,
+  // Settings screen state
+  pub settings_category: SettingsCategory,
+  pub settings_items: Vec<SettingItem>,
+  pub settings_selected_index: usize,
+  pub settings_edit_mode: bool,
+  pub settings_edit_buffer: String,
 }
 
 impl Default for App {
@@ -448,6 +530,12 @@ impl Default for App {
       update_prompt_acknowledged: false,
       lyrics: None,
       lyrics_status: LyricsStatus::default(),
+      // Settings defaults
+      settings_category: SettingsCategory::default(),
+      settings_items: Vec::new(),
+      settings_selected_index: 0,
+      settings_edit_mode: false,
+      settings_edit_buffer: String::new(),
     }
   }
 }
@@ -577,6 +665,8 @@ impl App {
       );
 
       self.seek_ms = Some(new_progress as u128);
+      // Dispatch the seek immediately instead of waiting for the poll interval
+      self.apply_seek(new_progress);
     }
   }
 
@@ -588,6 +678,8 @@ impl App {
     let new_progress =
       (old_progress as u32).saturating_sub(self.user_config.behavior.seek_milliseconds);
     self.seek_ms = Some(new_progress as u128);
+    // Dispatch the seek immediately instead of waiting for the poll interval
+    self.dispatch(IoEvent::Seek(new_progress));
   }
 
   pub fn get_recommendations_for_seed(
@@ -1263,6 +1355,355 @@ impl App {
     if self.help_menu_offset > self.help_docs_size {
       self.help_menu_offset = old_offset;
       self.help_menu_page -= 1;
+    }
+  }
+
+  /// Load settings for the current category into settings_items
+  pub fn load_settings_for_category(&mut self) {
+    use crate::event::Key;
+
+    // Helper to convert Key to displayable string
+    fn key_to_string(key: &Key) -> String {
+      match key {
+        Key::Char(c) => c.to_string(),
+        Key::Ctrl(c) => format!("ctrl-{}", c),
+        Key::Alt(c) => format!("alt-{}", c),
+        Key::Enter => "enter".to_string(),
+        Key::Esc => "esc".to_string(),
+        Key::Backspace => "backspace".to_string(),
+        Key::Delete => "del".to_string(),
+        Key::Left => "left".to_string(),
+        Key::Right => "right".to_string(),
+        Key::Up => "up".to_string(),
+        Key::Down => "down".to_string(),
+        Key::PageUp => "pageup".to_string(),
+        Key::PageDown => "pagedown".to_string(),
+        _ => "unknown".to_string(),
+      }
+    }
+
+    self.settings_items = match self.settings_category {
+      SettingsCategory::Behavior => vec![
+        SettingItem {
+          id: "behavior.seek_milliseconds".to_string(),
+          name: "Seek Duration (ms)".to_string(),
+          description: "Milliseconds to skip when seeking".to_string(),
+          value: SettingValue::Number(self.user_config.behavior.seek_milliseconds as i64),
+        },
+        SettingItem {
+          id: "behavior.volume_increment".to_string(),
+          name: "Volume Increment".to_string(),
+          description: "Volume change per keypress (0-100)".to_string(),
+          value: SettingValue::Number(self.user_config.behavior.volume_increment as i64),
+        },
+        SettingItem {
+          id: "behavior.tick_rate_milliseconds".to_string(),
+          name: "Tick Rate (ms)".to_string(),
+          description: "UI refresh rate in milliseconds".to_string(),
+          value: SettingValue::Number(self.user_config.behavior.tick_rate_milliseconds as i64),
+        },
+        SettingItem {
+          id: "behavior.enable_text_emphasis".to_string(),
+          name: "Text Emphasis".to_string(),
+          description: "Enable bold/italic text styling".to_string(),
+          value: SettingValue::Bool(self.user_config.behavior.enable_text_emphasis),
+        },
+        SettingItem {
+          id: "behavior.show_loading_indicator".to_string(),
+          name: "Loading Indicator".to_string(),
+          description: "Show loading status in UI".to_string(),
+          value: SettingValue::Bool(self.user_config.behavior.show_loading_indicator),
+        },
+        SettingItem {
+          id: "behavior.enforce_wide_search_bar".to_string(),
+          name: "Wide Search Bar".to_string(),
+          description: "Force search bar to take full width".to_string(),
+          value: SettingValue::Bool(self.user_config.behavior.enforce_wide_search_bar),
+        },
+        SettingItem {
+          id: "behavior.set_window_title".to_string(),
+          name: "Set Window Title".to_string(),
+          description: "Update terminal window title with track info".to_string(),
+          value: SettingValue::Bool(self.user_config.behavior.set_window_title),
+        },
+        SettingItem {
+          id: "behavior.liked_icon".to_string(),
+          name: "Liked Icon".to_string(),
+          description: "Icon for liked songs".to_string(),
+          value: SettingValue::String(self.user_config.behavior.liked_icon.clone()),
+        },
+        SettingItem {
+          id: "behavior.shuffle_icon".to_string(),
+          name: "Shuffle Icon".to_string(),
+          description: "Icon for shuffle mode".to_string(),
+          value: SettingValue::String(self.user_config.behavior.shuffle_icon.clone()),
+        },
+        SettingItem {
+          id: "behavior.playing_icon".to_string(),
+          name: "Playing Icon".to_string(),
+          description: "Icon for playing state".to_string(),
+          value: SettingValue::String(self.user_config.behavior.playing_icon.clone()),
+        },
+        SettingItem {
+          id: "behavior.paused_icon".to_string(),
+          name: "Paused Icon".to_string(),
+          description: "Icon for paused state".to_string(),
+          value: SettingValue::String(self.user_config.behavior.paused_icon.clone()),
+        },
+      ],
+      SettingsCategory::Keybindings => vec![
+        SettingItem {
+          id: "keys.back".to_string(),
+          name: "Back".to_string(),
+          description: "Go back / quit".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.back)),
+        },
+        SettingItem {
+          id: "keys.next_page".to_string(),
+          name: "Next Page".to_string(),
+          description: "Navigate to next page".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.next_page)),
+        },
+        SettingItem {
+          id: "keys.previous_page".to_string(),
+          name: "Previous Page".to_string(),
+          description: "Navigate to previous page".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.previous_page)),
+        },
+        SettingItem {
+          id: "keys.toggle_playback".to_string(),
+          name: "Toggle Playback".to_string(),
+          description: "Play/pause".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.toggle_playback)),
+        },
+        SettingItem {
+          id: "keys.seek_backwards".to_string(),
+          name: "Seek Backwards".to_string(),
+          description: "Seek backwards in track".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.seek_backwards)),
+        },
+        SettingItem {
+          id: "keys.seek_forwards".to_string(),
+          name: "Seek Forwards".to_string(),
+          description: "Seek forwards in track".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.seek_forwards)),
+        },
+        SettingItem {
+          id: "keys.next_track".to_string(),
+          name: "Next Track".to_string(),
+          description: "Skip to next track".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.next_track)),
+        },
+        SettingItem {
+          id: "keys.previous_track".to_string(),
+          name: "Previous Track".to_string(),
+          description: "Go to previous track".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.previous_track)),
+        },
+        SettingItem {
+          id: "keys.shuffle".to_string(),
+          name: "Shuffle".to_string(),
+          description: "Toggle shuffle mode".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.shuffle)),
+        },
+        SettingItem {
+          id: "keys.repeat".to_string(),
+          name: "Repeat".to_string(),
+          description: "Cycle repeat mode".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.repeat)),
+        },
+        SettingItem {
+          id: "keys.search".to_string(),
+          name: "Search".to_string(),
+          description: "Open search".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.search)),
+        },
+        SettingItem {
+          id: "keys.help".to_string(),
+          name: "Help".to_string(),
+          description: "Show help menu".to_string(),
+          value: SettingValue::Key(key_to_string(&self.user_config.keys.help)),
+        },
+      ],
+      SettingsCategory::Theme => {
+        fn color_to_string(color: ratatui::style::Color) -> String {
+          match color {
+            ratatui::style::Color::Rgb(r, g, b) => format!("{},{},{}", r, g, b),
+            ratatui::style::Color::Reset => "Reset".to_string(),
+            ratatui::style::Color::Black => "Black".to_string(),
+            ratatui::style::Color::Red => "Red".to_string(),
+            ratatui::style::Color::Green => "Green".to_string(),
+            ratatui::style::Color::Yellow => "Yellow".to_string(),
+            ratatui::style::Color::Blue => "Blue".to_string(),
+            ratatui::style::Color::Magenta => "Magenta".to_string(),
+            ratatui::style::Color::Cyan => "Cyan".to_string(),
+            ratatui::style::Color::Gray => "Gray".to_string(),
+            ratatui::style::Color::DarkGray => "DarkGray".to_string(),
+            ratatui::style::Color::LightRed => "LightRed".to_string(),
+            ratatui::style::Color::LightGreen => "LightGreen".to_string(),
+            ratatui::style::Color::LightYellow => "LightYellow".to_string(),
+            ratatui::style::Color::LightBlue => "LightBlue".to_string(),
+            ratatui::style::Color::LightMagenta => "LightMagenta".to_string(),
+            ratatui::style::Color::LightCyan => "LightCyan".to_string(),
+            ratatui::style::Color::White => "White".to_string(),
+            _ => "Unknown".to_string(),
+          }
+        }
+
+        vec![
+          SettingItem {
+            id: "theme.preset".to_string(),
+            name: "Theme Preset".to_string(),
+            description: "Choose a preset theme or customize below".to_string(),
+            value: SettingValue::Preset("Default (Cyan)".to_string()), // Default preset
+          },
+          SettingItem {
+            id: "theme.active".to_string(),
+            name: "Active Color".to_string(),
+            description: "Color for active elements".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.active)),
+          },
+          SettingItem {
+            id: "theme.banner".to_string(),
+            name: "Banner Color".to_string(),
+            description: "Color for banner text".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.banner)),
+          },
+          SettingItem {
+            id: "theme.hint".to_string(),
+            name: "Hint Color".to_string(),
+            description: "Color for hints".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.hint)),
+          },
+          SettingItem {
+            id: "theme.hovered".to_string(),
+            name: "Hovered Color".to_string(),
+            description: "Color for hovered elements".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.hovered)),
+          },
+          SettingItem {
+            id: "theme.selected".to_string(),
+            name: "Selected Color".to_string(),
+            description: "Color for selected items".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.selected)),
+          },
+          SettingItem {
+            id: "theme.inactive".to_string(),
+            name: "Inactive Color".to_string(),
+            description: "Color for inactive elements".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.inactive)),
+          },
+          SettingItem {
+            id: "theme.text".to_string(),
+            name: "Text Color".to_string(),
+            description: "Default text color".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.text)),
+          },
+          SettingItem {
+            id: "theme.error_text".to_string(),
+            name: "Error Text Color".to_string(),
+            description: "Color for error messages".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.error_text)),
+          },
+          SettingItem {
+            id: "theme.playbar_background".to_string(),
+            name: "Playbar Background".to_string(),
+            description: "Background color for playbar".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.playbar_background)),
+          },
+          SettingItem {
+            id: "theme.playbar_progress".to_string(),
+            name: "Playbar Progress".to_string(),
+            description: "Color for playbar progress".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.playbar_progress)),
+          },
+          SettingItem {
+            id: "theme.highlighted_lyrics".to_string(),
+            name: "Lyrics Highlight".to_string(),
+            description: "Color for current lyrics line".to_string(),
+            value: SettingValue::Color(color_to_string(self.user_config.theme.highlighted_lyrics)),
+          },
+        ]
+      }
+    };
+    self.settings_selected_index = 0;
+  }
+
+  /// Apply changes from settings_items back to user_config
+  pub fn apply_settings_changes(&mut self) {
+    for setting in &self.settings_items {
+      match setting.id.as_str() {
+        // Behavior settings
+        "behavior.seek_milliseconds" => {
+          if let SettingValue::Number(v) = &setting.value {
+            self.user_config.behavior.seek_milliseconds = *v as u32;
+          }
+        }
+        "behavior.volume_increment" => {
+          if let SettingValue::Number(v) = &setting.value {
+            self.user_config.behavior.volume_increment = (*v).clamp(0, 100) as u8;
+          }
+        }
+        "behavior.tick_rate_milliseconds" => {
+          if let SettingValue::Number(v) = &setting.value {
+            self.user_config.behavior.tick_rate_milliseconds = (*v).max(1) as u64;
+          }
+        }
+        "behavior.enable_text_emphasis" => {
+          if let SettingValue::Bool(v) = &setting.value {
+            self.user_config.behavior.enable_text_emphasis = *v;
+          }
+        }
+        "behavior.show_loading_indicator" => {
+          if let SettingValue::Bool(v) = &setting.value {
+            self.user_config.behavior.show_loading_indicator = *v;
+          }
+        }
+        "behavior.enforce_wide_search_bar" => {
+          if let SettingValue::Bool(v) = &setting.value {
+            self.user_config.behavior.enforce_wide_search_bar = *v;
+          }
+        }
+        "behavior.set_window_title" => {
+          if let SettingValue::Bool(v) = &setting.value {
+            self.user_config.behavior.set_window_title = *v;
+          }
+        }
+        "behavior.liked_icon" => {
+          if let SettingValue::String(v) = &setting.value {
+            self.user_config.behavior.liked_icon = v.clone();
+          }
+        }
+        "behavior.shuffle_icon" => {
+          if let SettingValue::String(v) = &setting.value {
+            self.user_config.behavior.shuffle_icon = v.clone();
+          }
+        }
+        "behavior.playing_icon" => {
+          if let SettingValue::String(v) = &setting.value {
+            self.user_config.behavior.playing_icon = v.clone();
+          }
+        }
+        "behavior.paused_icon" => {
+          if let SettingValue::String(v) = &setting.value {
+            self.user_config.behavior.paused_icon = v.clone();
+          }
+        }
+        // Theme preset - applies all colors at once
+        "theme.preset" => {
+          if let SettingValue::Preset(preset_name) = &setting.value {
+            use crate::user_config::ThemePreset;
+            let preset = ThemePreset::from_name(preset_name);
+            if preset != ThemePreset::Custom {
+              // Apply the preset's theme colors
+              self.user_config.theme = preset.to_theme();
+            }
+          }
+        }
+        // Note: Individual color changes and keybindings require more complex parsing
+        // and may need restart to take full effect
+        _ => {}
+      }
     }
   }
 }

@@ -98,7 +98,8 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
           .value(bar_value)
           .label(Line::from(*label))
           .style(Style::default().fg(color))
-          .value_style(Style::default().fg(Color::White).bg(color))
+          .value_style(Style::default().fg(Color::Rgb(255, 255, 255)).bg(color))
+        // RGB for cross-terminal compat
       })
       .collect();
 

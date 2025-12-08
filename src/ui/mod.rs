@@ -1,5 +1,6 @@
 pub mod audio_analysis;
 pub mod help;
+pub mod settings;
 pub mod util;
 use super::{
   app::{
@@ -260,6 +261,7 @@ pub fn draw_routes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     RouteId::BasicView => {} // This is handled as a "full screen" route in main.rs
     RouteId::Dialog => {} // This is handled in the draw_dialog function in mod.rs
     RouteId::UpdatePrompt => {} // This is handled as a "full screen" route in main.rs
+    RouteId::Settings => {} // This is handled as a "full screen" route in main.rs
   };
 }
 
@@ -898,7 +900,7 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
   let block = Block::default()
     .borders(Borders::ALL)
     .title(" Lyrics ")
-    .style(Style::default().fg(Color::DarkGray));
+    .style(Style::default().fg(Color::Rgb(100, 100, 100))); // RGB for cross-terminal compat
   f.render_widget(block.clone(), area);
 
   let inner_area = block.inner(area);
@@ -913,7 +915,7 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
 
     if !text.is_empty() {
       let p = Paragraph::new(text)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(Color::Rgb(100, 100, 100))) // RGB for cross-terminal compat
         .alignment(Alignment::Center);
 
       // Center vertically in inner area
@@ -964,12 +966,14 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
         let (_, text) = &lyrics[line_idx as usize];
         let is_active = line_idx == active_idx as i32;
 
+        // Use explicit RGB colors for cross-terminal compatibility
+        // Some terminals (like Kitty with custom themes) remap ANSI colors
         let style = if is_active {
           Style::default()
-            .fg(Color::White)
+            .fg(app.user_config.theme.highlighted_lyrics) // Use theme color for highlighted lyrics
             .add_modifier(Modifier::BOLD)
         } else {
-          Style::default().fg(Color::DarkGray)
+          Style::default().fg(Color::Rgb(100, 100, 100)) // Dim gray for inactive lines
         };
 
         let p = Paragraph::new(text.clone())
@@ -1265,18 +1269,19 @@ fn parse_changelog_with_style<'a>(
       Line::from(Span::styled(
         format!("═══ {} ═══", line.trim_start_matches("## ")),
         Style::default()
-          .fg(Color::Cyan)
+          .fg(Color::Rgb(0, 180, 180)) // Cyan equivalent (RGB for cross-terminal compat)
           .add_modifier(Modifier::BOLD),
       ))
     } else if line.starts_with("### ") {
       // Section headers (Added/Fixed/Changed)
+      // Use RGB colors for cross-terminal compatibility
       let section = line.trim_start_matches("### ");
       let color = match section {
-        "Added" => Color::Green,
-        "Fixed" => Color::Yellow,
-        "Changed" => Color::Blue,
-        "Removed" => Color::Red,
-        "Security" => Color::Magenta,
+        "Added" => Color::Rgb(0, 180, 0),      // Green
+        "Fixed" => Color::Rgb(200, 200, 0),    // Yellow
+        "Changed" => Color::Rgb(80, 80, 200),  // Blue
+        "Removed" => Color::Rgb(200, 0, 0),    // Red
+        "Security" => Color::Rgb(180, 0, 180), // Magenta
         _ => theme.text,
       };
       Line::from(Span::styled(

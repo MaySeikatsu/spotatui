@@ -40,9 +40,11 @@ We respect your privacy. This is purely a fun community metric with zero trackin
       - [Linux Requirements](#linux-requirements)
     - [Cargo](#cargo)
     - [Building from Source](#building-from-source)
-  - [Connecting to Spotify’s API](#connecting-to-spotifys-api)
+  - [Connecting to Spotify's API](#connecting-to-spotifys-api)
   - [Usage](#usage)
+  - [Native Streaming (Experimental)](#native-streaming-experimental)
 - [Configuration](#configuration)
+- [In-App Settings](#in-app-settings)
   - [Limitations](#limitations)
     - [Deprecated Spotify API Features](#deprecated-spotify-api-features)
   - [Using with spotifyd](#using-with-spotifyd)
@@ -152,7 +154,9 @@ But here they are again:
 1. Click `Create an app`
     - You now can see your `Client ID` and `Client Secret`
 1. Now click `Edit Settings`
-1. Add `http://127.0.0.1:8888/callback` to the Redirect URIs (Note: use `127.0.0.1` instead of `localhost` as Spotify no longer allows `localhost` as a redirect URI)
+1. Add the following Redirect URIs (use `127.0.0.1` instead of `localhost` as Spotify no longer allows `localhost`):
+    - `http://127.0.0.1:8888/callback` (for API authentication)
+    - `http://127.0.0.1:8989/login` (for native streaming - see [Native Streaming](#native-streaming-experimental))
 1. Scroll down and click `Save`
 1. You are now ready to authenticate with Spotify!
 1. Go back to the terminal
@@ -163,7 +167,7 @@ But here they are again:
 1. You will be redirected to an official Spotify webpage to ask you for permissions.
 1. After accepting the permissions, you'll be redirected to localhost. If all goes well, the redirect URL will be parsed automatically and now you're done. If the local webserver fails for some reason you'll be redirected to a blank webpage that might say something like "Connection Refused" since no server is running. Regardless, copy the URL and paste into the prompt in the terminal.
 
-And now you are ready to use `spotatui` 🎉
+And now you are ready to use `Spotatui` 🎉
 
 You can edit the config at anytime at `${HOME}/.config/spotatui/client.yml`.
 
@@ -189,6 +193,31 @@ spotatui list --liked --limit 50 # See your liked songs (50 is the max limit)
 # Looks for 'An even cooler song' and gives you the '{name} from {album}' of up to 30 matches
 spotatui search "An even cooler song" --tracks --format "%t from %b" --limit 30
 ```
+
+## Native Streaming (Experimental)
+
+Spotatui now includes **native Spotify Connect** support, allowing it to play audio directly on your computer without needing an external player like spotifyd.
+
+### Setup
+
+The native streaming feature uses a separate authentication flow. On first run:
+
+1. Your browser will open to Spotify's authorization page
+2. **Important:** The redirect URI will be `http://127.0.0.1:8989/login` - this is different from the main app's callback URL
+3. After authorizing, "Spotatui" will appear in your Spotify Connect device list
+4. Credentials are cached so you only need to do this once
+
+### How It Works
+
+- When streaming is enabled, "Spotatui" registers as a Spotify Connect device
+- You can control playback from the TUI, your phone, or any other Spotify client
+- Audio plays directly on the computer running spotatui
+
+### Notes
+
+- Native streaming is **enabled by default** when built with the `streaming` feature
+- Premium account is required for playback
+- The streaming authentication uses a different client than the main app's API controls
 
 # Configuration
 
@@ -276,9 +305,52 @@ keybindings:
   add_item_to_queue: "z"
 ```
 
+## In-App Settings
+
+Press `Alt-,` to open the **Settings** screen, where you can customize Spotatui without editing config files manually.
+
+### Settings Categories
+
+| Category | Description |
+|----------|-------------|
+| **Behavior** | Seek duration, volume increment, tick rate, icons, toggles |
+| **Keybindings** | View current keybindings (customization coming soon) |
+| **Theme** | Color presets and individual color customization |
+
+### Theme Presets
+
+Choose from 7 built-in theme presets:
+
+| Preset | Description |
+|--------|-------------|
+| Default (Cyan) | Original Spotatui theme |
+| Spotify | Official Spotify green (#1DB954) |
+| Dracula | Popular dark purple/pink theme |
+| Nord | Arctic, bluish color palette |
+| Solarized Dark | Classic dark theme |
+| Monokai | Vibrant colors on dark background |
+| Gruvbox | Warm retro groove colors |
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| `Alt-,` | Open Settings |
+| `←` / `→` | Switch category tabs |
+| `↑` / `↓` | Navigate settings |
+| `Enter` | Toggle boolean / Cycle preset / Edit value |
+| `Alt-S` | Save changes |
+| `Esc` | Exit Settings |
+
+Changes are applied **immediately** when saved - no restart required!
+
 ## Limitations
 
-This app uses the [Web API](https://developer.spotify.com/documentation/web-api/) from Spotify, which doesn't handle streaming itself. So you'll need either an official Spotify client open or a lighter weight alternative such as [spotifyd](https://github.com/Spotifyd/spotifyd).
+This app uses the [Web API](https://developer.spotify.com/documentation/web-api/) from Spotify, which doesn't handle streaming itself. You have three options for audio playback:
+
+1. **Native Streaming (NEW!)** - Spotatui can now play audio directly using its built-in streaming feature. See [Native Streaming](#native-streaming-experimental) below.
+2. **Official Spotify Client** - Have the official Spotify app open on your computer
+3. **Spotifyd** - Use a lightweight alternative like [spotifyd](https://github.com/Spotifyd/spotifyd)
 
 If you want to play tracks, Spotify requires that you have a Premium account.
 
@@ -293,6 +365,8 @@ If you want to play tracks, Spotify requires that you have a Premium account.
 For more information, see [Spotify's announcement about API changes](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api).
 
 ## Using with [spotifyd](https://github.com/Spotifyd/spotifyd)
+
+> **Note:** If you're using native streaming, you don't need spotifyd!
 
 Follow the spotifyd documentation to get set up.
 

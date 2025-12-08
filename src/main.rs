@@ -7,6 +7,8 @@ mod config;
 mod event;
 mod handlers;
 mod network;
+#[cfg(feature = "streaming")]
+mod player;
 mod redirect_uri;
 mod ui;
 mod user_config;
@@ -52,7 +54,7 @@ use std::{
 use tokio::sync::Mutex;
 use user_config::{UserConfig, UserConfigPaths};
 
-const SCOPES: [&str; 14] = [
+const SCOPES: [&str; 15] = [
   "playlist-read-collaborative",
   "playlist-read-private",
   "playlist-modify-private",
@@ -67,6 +69,7 @@ const SCOPES: [&str; 14] = [
   "user-read-playback-position",
   "user-read-private",
   "user-read-recently-played",
+  "streaming", // Required for native playback
 ];
 
 // Manual token cache helpers since rspotify's built-in caching isn't working
@@ -421,6 +424,9 @@ of the app. Beware that this comes at a CPU cost!",
   if let Some(cmd) = matches.subcommand_name() {
     // Save, because we checked if the subcommand is present at runtime
     let m = matches.subcommand_matches(cmd).unwrap();
+    #[cfg(feature = "streaming")]
+    let network = Network::new(spotify, client_config, &app, None); // CLI doesn't use streaming
+    #[cfg(not(feature = "streaming"))]
     let network = Network::new(spotify, client_config, &app);
     println!(
       "{}",
@@ -428,9 +434,77 @@ of the app. Beware that this comes at a CPU cost!",
     );
   // Launch the UI (async)
   } else {
+    // Initialize streaming player if enabled
+    #[cfg(feature = "streaming")]
+    let streaming_player = if client_config.enable_streaming {
+      let streaming_config = player::StreamingConfig {
+        device_name: client_config.streaming_device_name.clone(),
+        bitrate: client_config.streaming_bitrate,
+        audio_cache: client_config.streaming_audio_cache,
+        cache_path: player::get_default_cache_path(),
+        initial_volume: 100, // Default to full volume
+      };
+
+      let redirect_uri = client_config.get_redirect_uri();
+
+      match player::StreamingPlayer::new(&client_config.client_id, &redirect_uri, streaming_config)
+        .await
+      {
+        Ok(p) => {
+          println!("Streaming player initialized as '{}'", p.device_name());
+          // Auto-activate Spotatui as the playback device so users don't need to manually select it
+          p.activate();
+          println!("Activated '{}' as playback device", p.device_name());
+          Some(Arc::new(p))
+        }
+        Err(e) => {
+          println!("Failed to initialize streaming: {}", e);
+          println!("Falling back to API-based playback control");
+          None
+        }
+      }
+    } else {
+      None
+    };
+
+    #[cfg(feature = "streaming")]
+    if streaming_player.is_some() {
+      println!("Native playback enabled - 'Spotatui' is now your active playback device");
+    }
+
+    // Clone streaming player and device name for use in network spawn
+    #[cfg(feature = "streaming")]
+    let streaming_player_clone = streaming_player.clone();
+    #[cfg(feature = "streaming")]
+    let streaming_device_name = streaming_player
+      .as_ref()
+      .map(|p| p.device_name().to_string());
+
+    // Spawn player event listener (updates app state from native player events)
+    #[cfg(feature = "streaming")]
+    if let Some(ref player) = streaming_player {
+      let event_rx = player.get_event_channel();
+      let app_for_events = Arc::clone(&app);
+      tokio::spawn(async move {
+        handle_player_events(event_rx, app_for_events).await;
+      });
+    }
+
     let cloned_app = Arc::clone(&app);
     tokio::spawn(async move {
+      #[cfg(feature = "streaming")]
+      let mut network = Network::new(spotify, client_config, &app, streaming_player_clone);
+      #[cfg(not(feature = "streaming"))]
       let mut network = Network::new(spotify, client_config, &app);
+
+      // Auto-select the streaming device as active playback device
+      #[cfg(feature = "streaming")]
+      if let Some(device_name) = streaming_device_name {
+        network
+          .handle_network_event(IoEvent::AutoSelectStreamingDevice(device_name))
+          .await;
+      }
+
       start_tokio(sync_io_rx, &mut network).await;
     });
     // The UI must run in the "main" thread
@@ -443,6 +517,112 @@ of the app. Beware that this comes at a CPU cost!",
 async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, network: &mut Network) {
   while let Ok(io_event) = io_rx.recv() {
     network.handle_network_event(io_event).await;
+  }
+}
+
+/// Handle player events from librespot and update app state directly
+/// This bypasses the Spotify Web API for instant UI updates
+#[cfg(feature = "streaming")]
+async fn handle_player_events(
+  mut event_rx: librespot_playback::player::PlayerEventChannel,
+  app: Arc<Mutex<App>>,
+) {
+  use chrono::TimeDelta;
+  use player::PlayerEvent;
+
+  while let Some(event) = event_rx.recv().await {
+    match event {
+      PlayerEvent::Playing {
+        play_request_id: _,
+        track_id,
+        position_ms,
+      } => {
+        let should_fetch_track = {
+          let mut app = app.lock().await;
+          app.song_progress_ms = position_ms as u128;
+
+          // Update is_playing state
+          if let Some(ref mut ctx) = app.current_playback_context {
+            ctx.is_playing = true;
+            ctx.progress = Some(TimeDelta::milliseconds(position_ms as i64));
+          }
+
+          // Reset the poll timer so we don't immediately overwrite with stale API data
+          app.instant_since_last_current_playback_poll = std::time::Instant::now();
+
+          // Check if track changed
+          let track_id_str = track_id.to_string();
+          let should_fetch = app.last_track_id.as_ref() != Some(&track_id_str);
+          if should_fetch {
+            app.last_track_id = Some(track_id_str);
+          }
+          should_fetch
+        }; // Lock released here
+
+        // Dispatch outside the lock to avoid deadlock
+        if should_fetch_track {
+          let mut app = app.lock().await;
+          app.dispatch(IoEvent::GetCurrentPlayback);
+        }
+      }
+      PlayerEvent::Paused {
+        play_request_id: _,
+        track_id: _,
+        position_ms,
+      } => {
+        let mut app = app.lock().await;
+        app.song_progress_ms = position_ms as u128;
+
+        if let Some(ref mut ctx) = app.current_playback_context {
+          ctx.is_playing = false;
+          ctx.progress = Some(TimeDelta::milliseconds(position_ms as i64));
+        }
+        app.instant_since_last_current_playback_poll = std::time::Instant::now();
+      }
+      PlayerEvent::Seeked {
+        play_request_id: _,
+        track_id: _,
+        position_ms,
+      } => {
+        let mut app = app.lock().await;
+        app.song_progress_ms = position_ms as u128;
+        app.seek_ms = None;
+
+        if let Some(ref mut ctx) = app.current_playback_context {
+          ctx.progress = Some(TimeDelta::milliseconds(position_ms as i64));
+        }
+        app.instant_since_last_current_playback_poll = std::time::Instant::now();
+      }
+      PlayerEvent::TrackChanged { audio_item } => {
+        // Track metadata changed - update UI
+        {
+          let mut app = app.lock().await;
+          app.song_progress_ms = 0;
+          app.last_track_id = Some(audio_item.track_id.to_string());
+        } // Lock released
+
+        // Dispatch outside the lock
+        let mut app = app.lock().await;
+        app.dispatch(IoEvent::GetCurrentPlayback);
+      }
+      PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => {
+        let mut app = app.lock().await;
+        if let Some(ref mut ctx) = app.current_playback_context {
+          ctx.is_playing = false;
+        }
+      }
+      PlayerEvent::VolumeChanged { volume } => {
+        let mut app = app.lock().await;
+        // Convert from 0-65535 to 0-100
+        let volume_percent = ((volume as f64 / 65535.0) * 100.0).round() as u32;
+        if let Some(ref mut ctx) = app.current_playback_context {
+          ctx.device.volume_percent = Some(volume_percent);
+        }
+      }
+      _ => {
+        // Ignore other events
+      }
+    }
   }
 }
 
@@ -538,6 +718,9 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
       }
       ActiveBlock::UpdatePrompt => {
         ui::draw_update_prompt(f, &app);
+      }
+      ActiveBlock::Settings => {
+        ui::settings::draw_settings(f, &app);
       }
       _ => {
         ui::draw_main_layout(f, &app);

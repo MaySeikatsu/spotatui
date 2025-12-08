@@ -27,6 +27,7 @@ pub struct UserTheme {
   pub selected: Option<String>,
   pub text: Option<String>,
   pub header: Option<String>,
+  pub highlighted_lyrics: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -50,27 +51,226 @@ pub struct Theme {
   pub selected: Color,
   pub text: Color,
   pub header: Color,
+  pub highlighted_lyrics: Color,
 }
 
 impl Default for Theme {
   fn default() -> Self {
+    // Use RGB colors for cross-terminal compatibility
+    // Named ANSI colors (like Color::Cyan) can be remapped by terminal themes
+    // causing inconsistent appearance across different terminals
     Theme {
-      analysis_bar: Color::LightCyan,
+      analysis_bar: Color::Rgb(0, 200, 200), // LightCyan equivalent
       analysis_bar_text: Color::Reset,
-      active: Color::Cyan,
-      banner: Color::LightCyan,
-      error_border: Color::Red,
-      error_text: Color::LightRed,
-      hint: Color::Yellow,
-      hovered: Color::Magenta,
-      inactive: Color::Gray,
-      playbar_background: Color::Black,
-      playbar_progress: Color::LightCyan,
-      playbar_progress_text: Color::Black,
+      active: Color::Rgb(0, 180, 180),            // Cyan equivalent
+      banner: Color::Rgb(0, 200, 200),            // LightCyan equivalent
+      error_border: Color::Rgb(200, 0, 0),        // Red equivalent
+      error_text: Color::Rgb(255, 100, 100),      // LightRed equivalent
+      hint: Color::Rgb(200, 200, 0),              // Yellow equivalent
+      hovered: Color::Rgb(180, 0, 180),           // Magenta equivalent
+      inactive: Color::Rgb(128, 128, 128),        // Gray equivalent
+      playbar_background: Color::Rgb(20, 20, 20), // Near-black
+      playbar_progress: Color::Rgb(0, 200, 200),  // LightCyan equivalent
+      playbar_progress_text: Color::Rgb(255, 255, 255), // Bright white for visibility
       playbar_text: Color::Reset,
-      selected: Color::LightCyan,
+      selected: Color::Rgb(0, 200, 200), // LightCyan equivalent
       text: Color::Reset,
       header: Color::Reset,
+      highlighted_lyrics: Color::Rgb(0, 200, 200), // LightCyan equivalent
+    }
+  }
+}
+
+/// Available theme presets
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum ThemePreset {
+  #[default]
+  Default,
+  Spotify,
+  Dracula,
+  Nord,
+  SolarizedDark,
+  Monokai,
+  Gruvbox,
+  Custom, // When user has manually customized colors
+}
+
+impl ThemePreset {
+  pub fn all() -> &'static [ThemePreset] {
+    &[
+      ThemePreset::Default,
+      ThemePreset::Spotify,
+      ThemePreset::Dracula,
+      ThemePreset::Nord,
+      ThemePreset::SolarizedDark,
+      ThemePreset::Monokai,
+      ThemePreset::Gruvbox,
+    ]
+  }
+
+  pub fn name(&self) -> &'static str {
+    match self {
+      ThemePreset::Default => "Default (Cyan)",
+      ThemePreset::Spotify => "Spotify",
+      ThemePreset::Dracula => "Dracula",
+      ThemePreset::Nord => "Nord",
+      ThemePreset::SolarizedDark => "Solarized Dark",
+      ThemePreset::Monokai => "Monokai",
+      ThemePreset::Gruvbox => "Gruvbox",
+      ThemePreset::Custom => "Custom",
+    }
+  }
+
+  pub fn from_name(name: &str) -> Self {
+    match name {
+      "Default (Cyan)" => ThemePreset::Default,
+      "Spotify" => ThemePreset::Spotify,
+      "Dracula" => ThemePreset::Dracula,
+      "Nord" => ThemePreset::Nord,
+      "Solarized Dark" => ThemePreset::SolarizedDark,
+      "Monokai" => ThemePreset::Monokai,
+      "Gruvbox" => ThemePreset::Gruvbox,
+      _ => ThemePreset::Custom,
+    }
+  }
+
+  pub fn next(&self) -> Self {
+    let presets = Self::all();
+    let current_idx = presets.iter().position(|p| p == self).unwrap_or(0);
+    let next_idx = (current_idx + 1) % presets.len();
+    presets[next_idx]
+  }
+
+  pub fn prev(&self) -> Self {
+    let presets = Self::all();
+    let current_idx = presets.iter().position(|p| p == self).unwrap_or(0);
+    let prev_idx = if current_idx == 0 {
+      presets.len() - 1
+    } else {
+      current_idx - 1
+    };
+    presets[prev_idx]
+  }
+
+  /// Get the theme colors for this preset
+  pub fn to_theme(self) -> Theme {
+    match self {
+      ThemePreset::Default => Theme::default(),
+      ThemePreset::Dracula => Theme {
+        analysis_bar: Color::Rgb(189, 147, 249),      // Purple
+        analysis_bar_text: Color::Rgb(248, 248, 242), // Foreground
+        active: Color::Rgb(80, 250, 123),             // Green
+        banner: Color::Rgb(255, 121, 198),            // Pink
+        error_border: Color::Rgb(255, 85, 85),        // Red
+        error_text: Color::Rgb(255, 85, 85),
+        hint: Color::Rgb(241, 250, 140),            // Yellow
+        hovered: Color::Rgb(189, 147, 249),         // Purple
+        inactive: Color::Rgb(98, 114, 164),         // Comment
+        playbar_background: Color::Rgb(40, 42, 54), // Background
+        playbar_progress: Color::Rgb(80, 250, 123), // Green
+        playbar_progress_text: Color::Rgb(248, 248, 242),
+        playbar_text: Color::Rgb(248, 248, 242),
+        selected: Color::Rgb(139, 233, 253), // Cyan
+        text: Color::Rgb(248, 248, 242),
+        header: Color::Rgb(255, 121, 198),             // Pink
+        highlighted_lyrics: Color::Rgb(255, 121, 198), // Pink
+      },
+      ThemePreset::Nord => Theme {
+        analysis_bar: Color::Rgb(136, 192, 208),      // Nord8 (frost)
+        analysis_bar_text: Color::Rgb(236, 239, 244), // Nord6
+        active: Color::Rgb(163, 190, 140),            // Nord14 (green)
+        banner: Color::Rgb(136, 192, 208),            // Nord8
+        error_border: Color::Rgb(191, 97, 106),       // Nord11 (red)
+        error_text: Color::Rgb(191, 97, 106),
+        hint: Color::Rgb(235, 203, 139),            // Nord13 (yellow)
+        hovered: Color::Rgb(180, 142, 173),         // Nord15 (purple)
+        inactive: Color::Rgb(76, 86, 106),          // Nord3
+        playbar_background: Color::Rgb(46, 52, 64), // Nord0
+        playbar_progress: Color::Rgb(136, 192, 208), // Nord8
+        playbar_progress_text: Color::Rgb(236, 239, 244),
+        playbar_text: Color::Rgb(236, 239, 244),
+        selected: Color::Rgb(129, 161, 193), // Nord9
+        text: Color::Rgb(236, 239, 244),     // Nord6
+        header: Color::Rgb(136, 192, 208),
+        highlighted_lyrics: Color::Rgb(136, 192, 208), // Nord8 (frost)
+      },
+      ThemePreset::SolarizedDark => Theme {
+        analysis_bar: Color::Rgb(38, 139, 210),       // Blue
+        analysis_bar_text: Color::Rgb(253, 246, 227), // Base3
+        active: Color::Rgb(133, 153, 0),              // Green
+        banner: Color::Rgb(38, 139, 210),             // Blue
+        error_border: Color::Rgb(220, 50, 47),        // Red
+        error_text: Color::Rgb(220, 50, 47),
+        hint: Color::Rgb(181, 137, 0),              // Yellow
+        hovered: Color::Rgb(211, 54, 130),          // Magenta
+        inactive: Color::Rgb(88, 110, 117),         // Base01
+        playbar_background: Color::Rgb(0, 43, 54),  // Base03
+        playbar_progress: Color::Rgb(42, 161, 152), // Cyan
+        playbar_progress_text: Color::Rgb(253, 246, 227),
+        playbar_text: Color::Rgb(147, 161, 161), // Base1
+        selected: Color::Rgb(42, 161, 152),      // Cyan
+        text: Color::Rgb(147, 161, 161),         // Base1
+        header: Color::Rgb(38, 139, 210),
+        highlighted_lyrics: Color::Rgb(38, 139, 210), // Blue
+      },
+      ThemePreset::Monokai => Theme {
+        analysis_bar: Color::Rgb(102, 217, 239),      // Cyan
+        analysis_bar_text: Color::Rgb(248, 248, 242), // Foreground
+        active: Color::Rgb(166, 226, 46),             // Green
+        banner: Color::Rgb(249, 38, 114),             // Pink
+        error_border: Color::Rgb(249, 38, 114),       // Pink (error)
+        error_text: Color::Rgb(249, 38, 114),
+        hint: Color::Rgb(230, 219, 116),            // Yellow
+        hovered: Color::Rgb(174, 129, 255),         // Purple
+        inactive: Color::Rgb(117, 113, 94),         // Comment
+        playbar_background: Color::Rgb(39, 40, 34), // Background
+        playbar_progress: Color::Rgb(166, 226, 46), // Green
+        playbar_progress_text: Color::Rgb(248, 248, 242),
+        playbar_text: Color::Rgb(248, 248, 242),
+        selected: Color::Rgb(102, 217, 239), // Cyan
+        text: Color::Rgb(248, 248, 242),
+        header: Color::Rgb(249, 38, 114),
+        highlighted_lyrics: Color::Rgb(249, 38, 114), // Pink
+      },
+      ThemePreset::Gruvbox => Theme {
+        analysis_bar: Color::Rgb(131, 165, 152),      // Aqua
+        analysis_bar_text: Color::Rgb(235, 219, 178), // fg
+        active: Color::Rgb(184, 187, 38),             // Green
+        banner: Color::Rgb(254, 128, 25),             // Orange
+        error_border: Color::Rgb(251, 73, 52),        // Red
+        error_text: Color::Rgb(251, 73, 52),
+        hint: Color::Rgb(250, 189, 47),             // Yellow
+        hovered: Color::Rgb(211, 134, 155),         // Purple
+        inactive: Color::Rgb(146, 131, 116),        // Gray
+        playbar_background: Color::Rgb(40, 40, 40), // bg
+        playbar_progress: Color::Rgb(184, 187, 38), // Green
+        playbar_progress_text: Color::Rgb(235, 219, 178),
+        playbar_text: Color::Rgb(235, 219, 178),
+        selected: Color::Rgb(131, 165, 152),          // Aqua
+        text: Color::Rgb(235, 219, 178),              // fg
+        header: Color::Rgb(254, 128, 25),             // Orange
+        highlighted_lyrics: Color::Rgb(254, 128, 25), // Orange
+      },
+      ThemePreset::Spotify => Theme {
+        analysis_bar: Color::Rgb(29, 185, 84), // Spotify Green #1DB954
+        analysis_bar_text: Color::Rgb(255, 255, 255), // White
+        active: Color::Rgb(29, 185, 84),       // Spotify Green
+        banner: Color::Rgb(29, 185, 84),       // Spotify Green
+        error_border: Color::Rgb(230, 76, 76), // Soft red
+        error_text: Color::Rgb(230, 76, 76),
+        hint: Color::Rgb(179, 179, 179),            // Gray hint
+        hovered: Color::Rgb(29, 185, 84),           // Spotify Green
+        inactive: Color::Rgb(83, 83, 83),           // Dark gray
+        playbar_background: Color::Rgb(24, 24, 24), // Near black
+        playbar_progress: Color::Rgb(29, 185, 84),  // Spotify Green
+        playbar_progress_text: Color::Rgb(255, 255, 255),
+        playbar_text: Color::Rgb(179, 179, 179), // Light gray
+        selected: Color::Rgb(29, 185, 84),       // Spotify Green
+        text: Color::Rgb(255, 255, 255),         // White
+        header: Color::Rgb(29, 185, 84),         // Spotify Green
+        highlighted_lyrics: Color::Rgb(29, 185, 84), // Spotify Green
+      },
+      ThemePreset::Custom => Theme::default(), // Won't be used directly
     }
   }
 }
@@ -401,6 +601,7 @@ impl UserConfig {
     to_theme_item!(selected);
     to_theme_item!(text);
     to_theme_item!(header);
+    to_theme_item!(highlighted_lyrics);
     Ok(())
   }
 
@@ -508,6 +709,81 @@ impl UserConfig {
     }
   }
 
+  /// Save the current configuration to the config file
+  pub fn save_config(&self) -> Result<()> {
+    let paths = match &self.path_to_config {
+      Some(path) => path,
+      None => return Err(anyhow!("Config path not initialized")),
+    };
+
+    // Helper to build behavior config from current values
+    let build_behavior = || BehaviorConfigString {
+      seek_milliseconds: Some(self.behavior.seek_milliseconds),
+      volume_increment: Some(self.behavior.volume_increment),
+      tick_rate_milliseconds: Some(self.behavior.tick_rate_milliseconds),
+      enable_text_emphasis: Some(self.behavior.enable_text_emphasis),
+      show_loading_indicator: Some(self.behavior.show_loading_indicator),
+      enforce_wide_search_bar: Some(self.behavior.enforce_wide_search_bar),
+      enable_global_song_count: Some(self.behavior.enable_global_song_count),
+      liked_icon: Some(self.behavior.liked_icon.clone()),
+      shuffle_icon: Some(self.behavior.shuffle_icon.clone()),
+      repeat_track_icon: Some(self.behavior.repeat_track_icon.clone()),
+      repeat_context_icon: Some(self.behavior.repeat_context_icon.clone()),
+      playing_icon: Some(self.behavior.playing_icon.clone()),
+      paused_icon: Some(self.behavior.paused_icon.clone()),
+      set_window_title: Some(self.behavior.set_window_title),
+    };
+
+    // Helper to build theme config from current values
+    let build_theme = || UserTheme {
+      active: Some(color_to_string(self.theme.active)),
+      banner: Some(color_to_string(self.theme.banner)),
+      error_border: Some(color_to_string(self.theme.error_border)),
+      error_text: Some(color_to_string(self.theme.error_text)),
+      hint: Some(color_to_string(self.theme.hint)),
+      hovered: Some(color_to_string(self.theme.hovered)),
+      inactive: Some(color_to_string(self.theme.inactive)),
+      playbar_background: Some(color_to_string(self.theme.playbar_background)),
+      playbar_progress: Some(color_to_string(self.theme.playbar_progress)),
+      playbar_progress_text: Some(color_to_string(self.theme.playbar_progress_text)),
+      playbar_text: Some(color_to_string(self.theme.playbar_text)),
+      selected: Some(color_to_string(self.theme.selected)),
+      text: Some(color_to_string(self.theme.text)),
+      header: Some(color_to_string(self.theme.header)),
+      highlighted_lyrics: Some(color_to_string(self.theme.highlighted_lyrics)),
+    };
+
+    // If the file exists, try to read it first to preserve keybindings
+    let final_config = if paths.config_file_path.exists() {
+      let config_string = fs::read_to_string(&paths.config_file_path)?;
+      if !config_string.trim().is_empty() {
+        let mut existing: UserConfigString = serde_yaml::from_str(&config_string)?;
+        // Update behavior and theme
+        existing.behavior = Some(build_behavior());
+        existing.theme = Some(build_theme());
+        existing
+      } else {
+        UserConfigString {
+          keybindings: None,
+          behavior: Some(build_behavior()),
+          theme: Some(build_theme()),
+        }
+      }
+    } else {
+      UserConfigString {
+        keybindings: None,
+        behavior: Some(build_behavior()),
+        theme: Some(build_theme()),
+      }
+    };
+
+    let content_yml = serde_yaml::to_string(&final_config)?;
+    let mut config_file = fs::File::create(&paths.config_file_path)?;
+    std::io::Write::write_all(&mut config_file, content_yml.as_bytes())?;
+
+    Ok(())
+  }
+
   pub fn padded_liked_icon(&self) -> String {
     format!("{} ", &self.behavior.liked_icon)
   }
@@ -548,6 +824,30 @@ fn parse_theme_item(theme_item: &str) -> Result<Color> {
   };
 
   Ok(color)
+}
+
+fn color_to_string(color: Color) -> String {
+  match color {
+    Color::Reset => "Reset".to_string(),
+    Color::Black => "Black".to_string(),
+    Color::Red => "Red".to_string(),
+    Color::Green => "Green".to_string(),
+    Color::Yellow => "Yellow".to_string(),
+    Color::Blue => "Blue".to_string(),
+    Color::Magenta => "Magenta".to_string(),
+    Color::Cyan => "Cyan".to_string(),
+    Color::Gray => "Gray".to_string(),
+    Color::DarkGray => "DarkGray".to_string(),
+    Color::LightRed => "LightRed".to_string(),
+    Color::LightGreen => "LightGreen".to_string(),
+    Color::LightYellow => "LightYellow".to_string(),
+    Color::LightBlue => "LightBlue".to_string(),
+    Color::LightMagenta => "LightMagenta".to_string(),
+    Color::LightCyan => "LightCyan".to_string(),
+    Color::White => "White".to_string(),
+    Color::Rgb(r, g, b) => format!("{}, {}, {}", r, g, b),
+    _ => "Reset".to_string(),
+  }
 }
 
 #[cfg(test)]

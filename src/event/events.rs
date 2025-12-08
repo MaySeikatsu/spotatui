@@ -61,12 +61,18 @@ impl Events {
             // Press and Release events are sent for each key press.
             if key.kind == KeyEventKind::Press {
               let key = Key::from(key);
-              event_tx.send(Event::Input(key)).unwrap();
+              // If send fails, the receiver has been dropped (app is closing)
+              if event_tx.send(Event::Input(key)).is_err() {
+                break;
+              }
             }
           }
         }
 
-        event_tx.send(Event::Tick).unwrap();
+        // If send fails, the receiver has been dropped (app is closing)
+        if event_tx.send(Event::Tick).is_err() {
+          break;
+        }
       }
     });
 
