@@ -107,45 +107,9 @@ jobs:
             ${{ env.BINARY_NAME }}-${{ matrix.artifact_prefix }}.zip
             ${{ env.BINARY_NAME }}-${{ matrix.artifact_prefix }}.zip.sha256
 
-  build-musl:
-    name: Build x86_64-unknown-linux-musl
-    runs-on: ubuntu-latest
-    container:
-      image: rust:alpine
-    
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install Alpine dependencies
-        run: |
-          apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static alsa-lib-dev alsa-lib-static perl make gcc
-
-      - name: Build release binary
-        run: |
-          cargo build --release --no-default-features --features telemetry,streaming
-        env:
-          OPENSSL_STATIC: "1"
-
-      - name: Package binary
-        run: |
-          cd target/release
-          strip spotatui || true
-          tar czvf ../../spotatui-linux-alpine-x86_64.tar.gz spotatui
-          cd ../..
-          sha256sum spotatui-linux-alpine-x86_64.tar.gz > spotatui-linux-alpine-x86_64.tar.gz.sha256
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: spotatui-linux-alpine-x86_64
-          path: |
-            spotatui-linux-alpine-x86_64.tar.gz
-            spotatui-linux-alpine-x86_64.tar.gz.sha256
-
   release:
     name: Create GitHub Release
-    needs: [build, build-musl]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -170,7 +134,6 @@ jobs:
 
             - On **Windows 10/11 (64-bit)** → `spotatui-windows-x86_64.zip`
             - On **Linux (Ubuntu, Arch, Fedora, etc.)** → `spotatui-linux-x86_64.tar.gz`
-            - On **Linux (Alpine / musl)** → `spotatui-linux-alpine-x86_64.tar.gz`
             - On **macOS with Intel CPU** → `spotatui-macos-x86_64.tar.gz`
             - On **macOS with Apple Silicon (M1/M2/M3)** → `spotatui-macos-aarch64.tar.gz`
 
