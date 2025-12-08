@@ -16,7 +16,7 @@ use librespot_playback::{
   audio_backend,
   config::{AudioFormat, PlayerConfig},
   mixer::{softmixer::SoftMixer, Mixer, MixerConfig},
-  player::Player,
+  player::{Player, PlayerEventChannel},
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -312,7 +312,15 @@ impl StreamingPlayer {
   pub fn shutdown(&self) {
     let _ = self.spirc.shutdown();
   }
+
+  /// Get a channel to receive player events (track changes, play/pause, seek, etc.)
+  pub fn get_event_channel(&self) -> PlayerEventChannel {
+    self.player.get_player_event_channel()
+  }
 }
+
+// Re-export PlayerEvent for use in other modules
+pub use librespot_playback::player::PlayerEvent;
 
 /// Helper to get the default cache path for streaming
 pub fn get_default_cache_path() -> Option<PathBuf> {

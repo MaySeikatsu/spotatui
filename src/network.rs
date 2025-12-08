@@ -32,6 +32,9 @@ use std::{
 use tokio::sync::Mutex;
 use tokio::try_join;
 
+#[cfg(feature = "streaming")]
+use crate::player::StreamingPlayer;
+
 pub enum IoEvent {
   GetCurrentPlayback,
   RefreshAuthentication,
@@ -96,13 +99,14 @@ pub enum IoEvent {
   GetLyrics(String, String, f64),
 }
 
-#[derive(Clone)]
 pub struct Network {
   pub spotify: AuthCodeSpotify,
   large_search_limit: u32,
   small_search_limit: u32,
   pub client_config: ClientConfig,
   pub app: Arc<Mutex<App>>,
+  #[cfg(feature = "streaming")]
+  streaming_player: Option<Arc<StreamingPlayer>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -113,6 +117,24 @@ struct LrcResponse {
 }
 
 impl Network {
+  #[cfg(feature = "streaming")]
+  pub fn new(
+    spotify: AuthCodeSpotify,
+    client_config: ClientConfig,
+    app: &Arc<Mutex<App>>,
+    streaming_player: Option<Arc<StreamingPlayer>>,
+  ) -> Self {
+    Network {
+      spotify,
+      large_search_limit: 50,
+      small_search_limit: 4,
+      client_config,
+      app: Arc::clone(app),
+      streaming_player,
+    }
+  }
+
+  #[cfg(not(feature = "streaming"))]
   pub fn new(spotify: AuthCodeSpotify, client_config: ClientConfig, app: &Arc<Mutex<App>>) -> Self {
     Network {
       spotify,
@@ -121,6 +143,15 @@ impl Network {
       client_config,
       app: Arc::clone(app),
     }
+  }
+
+  /// Check if we're using native streaming (for control routing)
+  #[cfg(feature = "streaming")]
+  fn is_native_streaming_active(&self) -> bool {
+    self
+      .streaming_player
+      .as_ref()
+      .is_some_and(|p| p.is_connected())
   }
 
   #[allow(clippy::cognitive_complexity)]
@@ -339,19 +370,20 @@ impl Network {
       )
       .await;
 
+    let mut app = self.app.lock().await;
+
     match context {
       Ok(Some(c)) => {
-        let mut app = self.app.lock().await;
-        app.current_playback_context = Some(c.clone());
         app.instant_since_last_current_playback_poll = Instant::now();
 
-        if let Some(item) = c.item {
+        // Process track info before storing context (avoids cloning)
+        if let Some(ref item) = c.item {
           match item {
             PlayableItem::Track(track) => {
-              if let Some(track_id) = track.id {
+              if let Some(ref track_id) = track.id {
                 let track_id_str = track_id.id().to_string();
 
-                // Check if this is a new track and telemetry is enabled
+                // Check if this is a new track
                 if app.last_track_id.as_ref() != Some(&track_id_str) {
                   if app.user_config.behavior.enable_global_song_count {
                     app.dispatch(IoEvent::IncrementGlobalSongCount);
@@ -367,25 +399,27 @@ impl Network {
                 }
 
                 app.last_track_id = Some(track_id_str);
-                app.dispatch(IoEvent::CurrentUserSavedTracksContains(vec![
-                  track_id.into_static()
-                ]));
+                app.dispatch(IoEvent::CurrentUserSavedTracksContains(vec![track_id
+                  .clone()
+                  .into_static()]));
               };
             }
             PlayableItem::Episode(_episode) => { /*should map this to following the podcast show*/ }
           }
         };
+
+        app.current_playback_context = Some(c);
       }
       Ok(None) => {
-        let mut app = self.app.lock().await;
         app.instant_since_last_current_playback_poll = Instant::now();
       }
       Err(e) => {
+        drop(app); // Release lock before error handler
         self.handle_error(anyhow!(e)).await;
+        return;
       }
     }
 
-    let mut app = self.app.lock().await;
     app.seek_ms.take();
     app.is_fetching_current_playback = false;
   }
@@ -458,12 +492,18 @@ impl Network {
   }
 
   async fn set_tracks_to_table(&mut self, tracks: Vec<FullTrack>) {
+    // Extract track IDs before moving tracks (avoids clone of entire vector)
+    let track_ids: Vec<TrackId<'static>> = tracks
+      .iter()
+      .filter_map(|item| item.id.as_ref().map(|id| id.clone().into_static()))
+      .collect();
+
     let mut app = self.app.lock().await;
-    app.track_table.tracks = tracks.clone();
 
     // Clamp selected_index to valid range after loading new tracks
-    if !app.track_table.tracks.is_empty() {
-      let max_index = app.track_table.tracks.len().saturating_sub(1);
+    let track_count = tracks.len();
+    if track_count > 0 {
+      let max_index = track_count.saturating_sub(1);
       if app.track_table.selected_index > max_index {
         app.track_table.selected_index = max_index;
       }
@@ -471,11 +511,7 @@ impl Network {
       app.track_table.selected_index = 0;
     }
 
-    // Send this event round with typed TrackId (don't block here)
-    let track_ids: Vec<TrackId<'static>> = tracks
-      .into_iter()
-      .filter_map(|item| item.id.map(|id| id.into_static()))
-      .collect();
+    app.track_table.tracks = tracks; // Move instead of clone
 
     app.dispatch(IoEvent::CurrentUserSavedTracksContains(track_ids));
   }
@@ -857,6 +893,19 @@ impl Network {
         .start_uris_playback(uris, device_id, None, None)
         .await
     } else {
+      // Resume playback - use native player if available for instant response
+      #[cfg(feature = "streaming")]
+      if self.is_native_streaming_active() {
+        if let Some(ref player) = self.streaming_player {
+          player.play();
+          // Update UI state immediately
+          let mut app = self.app.lock().await;
+          if let Some(ctx) = &mut app.current_playback_context {
+            ctx.is_playing = true;
+          }
+          return;
+        }
+      }
       self.spotify.resume_playback(device_id, None).await
     };
 
@@ -865,13 +914,19 @@ impl Network {
         // Re-enable shuffle if it was on before
         if should_disable_shuffle && original_shuffle_state {
           // Small delay to let playback start before re-enabling shuffle
-          tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+          tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
           let _ = self.spotify.shuffle(true, device_id).await;
         }
 
-        let mut app = self.app.lock().await;
-        app.song_progress_ms = 0;
-        app.dispatch(IoEvent::GetCurrentPlayback);
+        // Reset progress immediately
+        {
+          let mut app = self.app.lock().await;
+          app.song_progress_ms = 0;
+        }
+
+        // Wait for Spotify's API to sync before fetching updated state
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        self.get_current_playback().await;
       }
       Err(e) => {
         // Re-enable shuffle even on error if it was on before
@@ -884,15 +939,27 @@ impl Network {
   }
 
   async fn seek(&mut self, position_ms: u32) {
+    // Use native streaming player for instant seek (no network delay)
+    #[cfg(feature = "streaming")]
+    if self.is_native_streaming_active() {
+      if let Some(ref player) = self.streaming_player {
+        player.seek(position_ms);
+        // Update UI immediately without API polling
+        let mut app = self.app.lock().await;
+        app.song_progress_ms = position_ms as u128;
+        app.seek_ms = None;
+        return;
+      }
+    }
+
+    // Fallback to API-based seek
     let device_id = self.client_config.device_id.as_deref();
-    // rspotify 0.12 uses chrono::TimeDelta for seek_track
     let position = TimeDelta::milliseconds(position_ms as i64);
 
     match self.spotify.seek_track(position, device_id).await {
       Ok(()) => {
-        // Wait between seek and status query.
-        // Without it, the Spotify API may return the old progress.
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        // Reduced delay for API seek (still needed for server sync)
+        tokio::time::sleep(Duration::from_millis(200)).await;
         self.get_current_playback().await;
       }
       Err(e) => {
@@ -908,7 +975,7 @@ impl Network {
       .await
     {
       Ok(()) => {
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         self.get_current_playback().await;
       }
       Err(e) => {
@@ -924,7 +991,7 @@ impl Network {
       .await
     {
       Ok(()) => {
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         self.get_current_playback().await;
       }
       Err(e) => {
@@ -977,13 +1044,32 @@ impl Network {
   }
 
   async fn pause_playback(&mut self) {
+    // Use native streaming player for instant pause (no network delay)
+    #[cfg(feature = "streaming")]
+    if self.is_native_streaming_active() {
+      if let Some(ref player) = self.streaming_player {
+        player.pause();
+        // Update UI state immediately
+        let mut app = self.app.lock().await;
+        if let Some(ctx) = &mut app.current_playback_context {
+          ctx.is_playing = false;
+        }
+        return;
+      }
+    }
+
+    // Fallback to API-based pause
     match self
       .spotify
       .pause_playback(self.client_config.device_id.as_deref())
       .await
     {
       Ok(()) => {
-        self.get_current_playback().await;
+        // Update UI immediately instead of full playback poll
+        let mut app = self.app.lock().await;
+        if let Some(ctx) = &mut app.current_playback_context {
+          ctx.is_playing = false;
+        }
       }
       Err(e) => {
         self.handle_error(anyhow!(e)).await;
@@ -992,6 +1078,21 @@ impl Network {
   }
 
   async fn change_volume(&mut self, volume_percent: u8) {
+    // Use native streaming player for instant volume change (no network delay)
+    #[cfg(feature = "streaming")]
+    if self.is_native_streaming_active() {
+      if let Some(ref player) = self.streaming_player {
+        player.set_volume(volume_percent);
+        // Update UI state immediately
+        let mut app = self.app.lock().await;
+        if let Some(ctx) = &mut app.current_playback_context {
+          ctx.device.volume_percent = Some(volume_percent.into());
+        }
+        return;
+      }
+    }
+
+    // Fallback to API-based volume control
     match self
       .spotify
       .volume(volume_percent, self.client_config.device_id.as_deref())
