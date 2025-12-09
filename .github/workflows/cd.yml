@@ -214,6 +214,7 @@ jobs:
             cd /pkg &&
             su builder -c 'makepkg --printsrcinfo' > .SRCINFO
           "
+          sudo chown -R $(id -u):$(id -g) .
 
       - name: Commit and push to AUR
         working-directory: aur
