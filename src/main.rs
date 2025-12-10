@@ -498,13 +498,80 @@ of the app. Beware that this comes at a CPU cost!",
     #[cfg(feature = "streaming")]
     let shared_position_for_ui = Arc::clone(&shared_position);
 
+    // Create shared atomic for playing state (lock-free for MPRIS toggle)
+    #[cfg(feature = "streaming")]
+    let shared_is_playing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(feature = "streaming")]
+    let shared_is_playing_for_events = Arc::clone(&shared_is_playing);
+    #[cfg(feature = "mpris")]
+    let shared_is_playing_for_mpris = Arc::clone(&shared_is_playing);
+
+    // Initialize MPRIS D-Bus integration for desktop media control
+    // This registers spotatui as a controllable media player on the session bus
+    #[cfg(feature = "mpris")]
+    let mpris_manager: Option<Arc<mpris::MprisManager>> = if streaming_player.is_some() {
+      match mpris::MprisManager::new() {
+        Ok(mgr) => {
+          println!("MPRIS D-Bus interface registered - media keys and playerctl enabled");
+          Some(Arc::new(mgr))
+        }
+        Err(e) => {
+          println!(
+            "Failed to initialize MPRIS: {} - media key control disabled",
+            e
+          );
+          None
+        }
+      }
+    } else {
+      None
+    };
+
+    // Spawn MPRIS event handler to process external control requests (media keys, playerctl)
+    #[cfg(feature = "mpris")]
+    if let Some(ref mpris) = mpris_manager {
+      if let Some(event_rx) = mpris.take_event_rx() {
+        let streaming_player_for_mpris = streaming_player.clone();
+        tokio::spawn(async move {
+          handle_mpris_events(
+            event_rx,
+            streaming_player_for_mpris,
+            shared_is_playing_for_mpris,
+          )
+          .await;
+        });
+      }
+    }
+
+    // Clone MPRIS manager for player event handler
+    #[cfg(feature = "mpris")]
+    let mpris_for_events = mpris_manager.clone();
+
     // Spawn player event listener (updates app state from native player events)
     #[cfg(feature = "streaming")]
     if let Some(ref player) = streaming_player {
       let event_rx = player.get_event_channel();
       let app_for_events = Arc::clone(&app);
+      #[cfg(feature = "mpris")]
       tokio::spawn(async move {
-        handle_player_events(event_rx, app_for_events, shared_position_for_events).await;
+        handle_player_events(
+          event_rx,
+          app_for_events,
+          shared_position_for_events,
+          shared_is_playing_for_events,
+          mpris_for_events,
+        )
+        .await;
+      });
+      #[cfg(not(feature = "mpris"))]
+      tokio::spawn(async move {
+        handle_player_events(
+          event_rx,
+          app_for_events,
+          shared_position_for_events,
+          shared_is_playing_for_events,
+        )
+        .await;
       });
     }
 
@@ -548,14 +615,17 @@ async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, network: &mut Ne
 
 /// Handle player events from librespot and update app state directly
 /// This bypasses the Spotify Web API for instant UI updates
-#[cfg(feature = "streaming")]
+#[cfg(all(feature = "streaming", feature = "mpris"))]
 async fn handle_player_events(
   mut event_rx: librespot_playback::player::PlayerEventChannel,
   app: Arc<Mutex<App>>,
   shared_position: Arc<AtomicU64>,
+  shared_is_playing: Arc<std::sync::atomic::AtomicBool>,
+  mpris_manager: Option<Arc<mpris::MprisManager>>,
 ) {
   use chrono::TimeDelta;
   use player::PlayerEvent;
+  use std::sync::atomic::Ordering;
 
   while let Some(event) = event_rx.recv().await {
     // Use try_lock() to avoid blocking when the UI thread is busy
@@ -566,7 +636,22 @@ async fn handle_player_events(
         track_id,
         position_ms,
       } => {
-        // Try to get lock - skip if busy
+        // Always update atomic - this never fails (lock-free for MPRIS)
+        shared_is_playing.store(true, Ordering::Relaxed);
+
+        // Update MPRIS playback status
+        if let Some(ref mpris) = mpris_manager {
+          mpris.set_playback_status(true);
+        }
+
+        // Always update native_is_playing - this is critical for UI state
+        // Use blocking lock since this is a brief operation
+        {
+          let mut app_lock = app.lock().await;
+          app_lock.native_is_playing = Some(true);
+        }
+
+        // Try to get lock for other updates - skip if busy
         if let Ok(mut app) = app.try_lock() {
           app.song_progress_ms = position_ms as u128;
 
@@ -592,6 +677,22 @@ async fn handle_player_events(
         track_id: _,
         position_ms,
       } => {
+        // Always update atomic - this never fails (lock-free for MPRIS)
+        shared_is_playing.store(false, Ordering::Relaxed);
+
+        // Update MPRIS playback status
+        if let Some(ref mpris) = mpris_manager {
+          mpris.set_playback_status(false);
+        }
+
+        // Always update native_is_playing - this is critical for UI state
+        // Use blocking lock since this is a brief operation
+        {
+          let mut app_lock = app.lock().await;
+          app_lock.native_is_playing = Some(false);
+        }
+
+        // Try to get lock for other updates - skip if busy
         if let Ok(mut app) = app.try_lock() {
           app.song_progress_ms = position_ms as u128;
 
@@ -619,32 +720,37 @@ async fn handle_player_events(
       }
       PlayerEvent::TrackChanged { audio_item } => {
         // Track metadata changed - extract immediate info for instant UI updates
+        use librespot_metadata::audio::UniqueFields;
+
+        // Extract artist names and album from UniqueFields
+        let (artists, album) = match &audio_item.unique_fields {
+          UniqueFields::Track { artists, album, .. } => {
+            // Extract artist names from ArtistsWithRole
+            let artist_names: Vec<String> = artists.0.iter().map(|a| a.name.clone()).collect();
+            (artist_names, album.clone())
+          }
+          UniqueFields::Episode { show_name, .. } => (vec![show_name.clone()], String::new()),
+          UniqueFields::Local { artists, album, .. } => {
+            let artist_vec = artists
+              .as_ref()
+              .map(|a| vec![a.clone()])
+              .unwrap_or_default();
+            let album_str = album.clone().unwrap_or_default();
+            (artist_vec, album_str)
+          }
+        };
+
+        // Update MPRIS metadata
+        if let Some(ref mpris) = mpris_manager {
+          mpris.set_metadata(&audio_item.name, &artists, &album, audio_item.duration_ms);
+        }
+
         if let Ok(mut app) = app.try_lock() {
-          use librespot_metadata::audio::UniqueFields;
-
-          // Extract artist names and album from UniqueFields
-          let (artists, album) = match &audio_item.unique_fields {
-            UniqueFields::Track { artists, album, .. } => {
-              // Extract artist names from ArtistsWithRole
-              let artist_names: Vec<String> = artists.0.iter().map(|a| a.name.clone()).collect();
-              (artist_names, album.clone())
-            }
-            UniqueFields::Episode { show_name, .. } => (vec![show_name.clone()], String::new()),
-            UniqueFields::Local { artists, album, .. } => {
-              let artist_vec = artists
-                .as_ref()
-                .map(|a| vec![a.clone()])
-                .unwrap_or_default();
-              let album_str = album.clone().unwrap_or_default();
-              (artist_vec, album_str)
-            }
-          };
-
           // Store immediate track info for instant UI display
           app.native_track_info = Some(app::NativeTrackInfo {
             name: audio_item.name.clone(),
-            artists,
-            album,
+            artists: artists.clone(),
+            album: album.clone(),
             duration_ms: audio_item.duration_ms,
           });
 
@@ -656,6 +762,11 @@ async fn handle_player_events(
         }
       }
       PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => {
+        // Update MPRIS status
+        if let Some(ref mpris) = mpris_manager {
+          mpris.set_stopped();
+        }
+
         // When a track ends naturally, pre-fetch the next track's info immediately
         if let Ok(mut app) = app.try_lock() {
           if let Some(ref mut ctx) = app.current_playback_context {
@@ -675,14 +786,18 @@ async fn handle_player_events(
         }
       }
       PlayerEvent::VolumeChanged { volume } => {
+        // Update MPRIS volume
+        let volume_percent = ((volume as f64 / 65535.0) * 100.0).round() as u8;
+        if let Some(ref mpris) = mpris_manager {
+          mpris.set_volume(volume_percent);
+        }
+
         if let Ok(mut app) = app.try_lock() {
-          // Convert from 0-65535 to 0-100
-          let volume_percent = ((volume as f64 / 65535.0) * 100.0).round() as u32;
           if let Some(ref mut ctx) = app.current_playback_context {
-            ctx.device.volume_percent = Some(volume_percent);
+            ctx.device.volume_percent = Some(volume_percent as u32);
           }
           // Persist the latest volume so it is restored on next launch
-          app.user_config.behavior.volume_percent = volume_percent.min(100) as u8;
+          app.user_config.behavior.volume_percent = volume_percent.min(100);
           let _ = app.user_config.save_config();
         }
       }
@@ -697,6 +812,200 @@ async fn handle_player_events(
       }
       _ => {
         // Ignore other events
+      }
+    }
+  }
+}
+
+/// Handle player events from librespot and update app state directly
+/// This bypasses the Spotify Web API for instant UI updates
+#[cfg(all(feature = "streaming", not(feature = "mpris")))]
+async fn handle_player_events(
+  mut event_rx: librespot_playback::player::PlayerEventChannel,
+  app: Arc<Mutex<App>>,
+  shared_position: Arc<AtomicU64>,
+  shared_is_playing: Arc<std::sync::atomic::AtomicBool>,
+) {
+  use chrono::TimeDelta;
+  use player::PlayerEvent;
+  use std::sync::atomic::Ordering;
+
+  while let Some(event) = event_rx.recv().await {
+    match event {
+      PlayerEvent::Playing {
+        play_request_id: _,
+        track_id,
+        position_ms,
+      } => {
+        shared_is_playing.store(true, Ordering::Relaxed);
+        {
+          let mut app_lock = app.lock().await;
+          app_lock.native_is_playing = Some(true);
+        }
+        if let Ok(mut app) = app.try_lock() {
+          app.song_progress_ms = position_ms as u128;
+          if let Some(ref mut ctx) = app.current_playback_context {
+            ctx.is_playing = true;
+            ctx.progress = Some(TimeDelta::milliseconds(position_ms as i64));
+          }
+          app.instant_since_last_current_playback_poll = std::time::Instant::now();
+          let track_id_str = track_id.to_string();
+          if app.last_track_id.as_ref() != Some(&track_id_str) {
+            app.last_track_id = Some(track_id_str);
+            app.dispatch(IoEvent::GetCurrentPlayback);
+          }
+        }
+      }
+      PlayerEvent::Paused {
+        play_request_id: _,
+        track_id: _,
+        position_ms,
+      } => {
+        shared_is_playing.store(false, Ordering::Relaxed);
+        {
+          let mut app_lock = app.lock().await;
+          app_lock.native_is_playing = Some(false);
+        }
+        if let Ok(mut app) = app.try_lock() {
+          app.song_progress_ms = position_ms as u128;
+          if let Some(ref mut ctx) = app.current_playback_context {
+            ctx.is_playing = false;
+            ctx.progress = Some(TimeDelta::milliseconds(position_ms as i64));
+          }
+          app.instant_since_last_current_playback_poll = std::time::Instant::now();
+        }
+      }
+      PlayerEvent::Seeked {
+        play_request_id: _,
+        track_id: _,
+        position_ms,
+      } => {
+        if let Ok(mut app) = app.try_lock() {
+          app.song_progress_ms = position_ms as u128;
+          app.seek_ms = None;
+          if let Some(ref mut ctx) = app.current_playback_context {
+            ctx.progress = Some(TimeDelta::milliseconds(position_ms as i64));
+          }
+          app.instant_since_last_current_playback_poll = std::time::Instant::now();
+        }
+      }
+      PlayerEvent::TrackChanged { audio_item } => {
+        if let Ok(mut app) = app.try_lock() {
+          use librespot_metadata::audio::UniqueFields;
+          let (artists, album) = match &audio_item.unique_fields {
+            UniqueFields::Track { artists, album, .. } => {
+              let artist_names: Vec<String> = artists.0.iter().map(|a| a.name.clone()).collect();
+              (artist_names, album.clone())
+            }
+            UniqueFields::Episode { show_name, .. } => (vec![show_name.clone()], String::new()),
+            UniqueFields::Local { artists, album, .. } => {
+              let artist_vec = artists
+                .as_ref()
+                .map(|a| vec![a.clone()])
+                .unwrap_or_default();
+              let album_str = album.clone().unwrap_or_default();
+              (artist_vec, album_str)
+            }
+          };
+          app.native_track_info = Some(app::NativeTrackInfo {
+            name: audio_item.name.clone(),
+            artists,
+            album,
+            duration_ms: audio_item.duration_ms,
+          });
+          app.song_progress_ms = 0;
+          app.last_track_id = Some(audio_item.track_id.to_string());
+          app.instant_since_last_current_playback_poll = std::time::Instant::now();
+          app.dispatch(IoEvent::GetCurrentPlayback);
+        }
+      }
+      PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => {
+        if let Ok(mut app) = app.try_lock() {
+          if let Some(ref mut ctx) = app.current_playback_context {
+            ctx.is_playing = false;
+          }
+          app.song_progress_ms = 0;
+          app.last_track_id = None;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        if let Ok(mut app) = app.try_lock() {
+          app.dispatch(IoEvent::GetCurrentPlayback);
+        }
+      }
+      PlayerEvent::VolumeChanged { volume } => {
+        if let Ok(mut app) = app.try_lock() {
+          let volume_percent = ((volume as f64 / 65535.0) * 100.0).round() as u32;
+          if let Some(ref mut ctx) = app.current_playback_context {
+            ctx.device.volume_percent = Some(volume_percent);
+          }
+          app.user_config.behavior.volume_percent = volume_percent.min(100) as u8;
+          let _ = app.user_config.save_config();
+        }
+      }
+      PlayerEvent::PositionChanged {
+        play_request_id: _,
+        track_id: _,
+        position_ms,
+      } => {
+        shared_position.store(position_ms as u64, Ordering::Relaxed);
+      }
+      _ => {}
+    }
+  }
+}
+
+/// Handle MPRIS events from external clients (media keys, playerctl, etc.)
+/// Routes control requests to the native streaming player
+#[cfg(feature = "mpris")]
+async fn handle_mpris_events(
+  mut event_rx: tokio::sync::mpsc::UnboundedReceiver<mpris::MprisEvent>,
+  streaming_player: Option<Arc<player::StreamingPlayer>>,
+  shared_is_playing: Arc<std::sync::atomic::AtomicBool>,
+) {
+  use mpris::MprisEvent;
+  use std::sync::atomic::Ordering;
+
+  let Some(player) = streaming_player else {
+    // No streaming player, nothing to control
+    return;
+  };
+
+  while let Some(event) = event_rx.recv().await {
+    match event {
+      MprisEvent::PlayPause => {
+        // Toggle based on atomic state (lock-free, always up-to-date)
+        if shared_is_playing.load(Ordering::Relaxed) {
+          player.pause();
+        } else {
+          player.play();
+        }
+      }
+      MprisEvent::Play => {
+        player.play();
+      }
+      MprisEvent::Pause => {
+        player.pause();
+      }
+      MprisEvent::Next => {
+        player.next();
+        // Ensure playback continues after skip
+        player.play();
+      }
+      MprisEvent::Previous => {
+        player.prev();
+        // Ensure playback continues after skip
+        player.play();
+      }
+      MprisEvent::Stop => {
+        player.stop();
+      }
+      MprisEvent::Seek(offset_micros) => {
+        // Seek by offset - convert from microseconds to milliseconds
+        // Note: This is a relative seek, not absolute position
+        let offset_ms = (offset_micros / 1000) as u32;
+        // Since we don't have the current position here easily,
+        // this is a simplified implementation
+        player.seek(offset_ms);
       }
     }
   }

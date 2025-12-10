@@ -1010,11 +1010,13 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // give hint to choose a device
   if let Some(current_playback_context) = &app.current_playback_context {
     if let Some(track_item) = &current_playback_context.item {
-      let play_title = if current_playback_context.is_playing {
-        "Playing"
-      } else {
-        "Paused"
-      };
+      // Use native playing state when streaming is active (more reliable for MPRIS controls)
+      let is_playing = app
+        .native_is_playing
+        .filter(|_| app.is_streaming_active)
+        .unwrap_or(current_playback_context.is_playing);
+
+      let play_title = if is_playing { "Playing" } else { "Paused" };
 
       let shuffle_text = if current_playback_context.shuffle_state {
         "On"
