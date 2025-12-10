@@ -150,6 +150,16 @@ cargo install spotatui
 > sudo apt install libssl-dev pkg-config
 > ```
 
+### macOS
+
+For macOS, `spotatui` uses the `portaudio` backend for better stability and bluetooth device support (such as AirPods).
+
+`portaudio` needs to be installed first, via homebrew:
+
+```bash
+brew install portaudio
+```
+
 ### Building from Source
 
 Ensure you have [Rust](https://www.rust-lang.org/tools/install) installed.
