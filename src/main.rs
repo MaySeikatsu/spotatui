@@ -33,7 +33,7 @@ mod cli;
 mod config;
 mod event;
 mod handlers;
-#[cfg(feature = "mpris")]
+#[cfg(all(feature = "mpris", target_os = "linux"))]
 mod mpris;
 mod network;
 #[cfg(feature = "streaming")]
@@ -537,12 +537,12 @@ of the app. Beware that this comes at a CPU cost!",
     let shared_is_playing = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(feature = "streaming")]
     let shared_is_playing_for_events = Arc::clone(&shared_is_playing);
-    #[cfg(feature = "mpris")]
+    #[cfg(all(feature = "mpris", target_os = "linux"))]
     let shared_is_playing_for_mpris = Arc::clone(&shared_is_playing);
 
     // Initialize MPRIS D-Bus integration for desktop media control
     // This registers spotatui as a controllable media player on the session bus
-    #[cfg(feature = "mpris")]
+    #[cfg(all(feature = "mpris", target_os = "linux"))]
     let mpris_manager: Option<Arc<mpris::MprisManager>> = if streaming_player.is_some() {
       match mpris::MprisManager::new() {
         Ok(mgr) => {
@@ -562,7 +562,7 @@ of the app. Beware that this comes at a CPU cost!",
     };
 
     // Spawn MPRIS event handler to process external control requests (media keys, playerctl)
-    #[cfg(feature = "mpris")]
+    #[cfg(all(feature = "mpris", target_os = "linux"))]
     if let Some(ref mpris) = mpris_manager {
       if let Some(event_rx) = mpris.take_event_rx() {
         let streaming_player_for_mpris = streaming_player.clone();
@@ -578,11 +578,11 @@ of the app. Beware that this comes at a CPU cost!",
     }
 
     // Clone MPRIS manager for player event handler
-    #[cfg(feature = "mpris")]
+    #[cfg(all(feature = "mpris", target_os = "linux"))]
     let mpris_for_events = mpris_manager.clone();
 
     // Clone MPRIS manager for UI loop (to update status on device changes)
-    #[cfg(feature = "mpris")]
+    #[cfg(all(feature = "mpris", target_os = "linux"))]
     let mpris_for_ui = mpris_manager.clone();
 
     // Spawn player event listener (updates app state from native player events)
@@ -590,7 +590,7 @@ of the app. Beware that this comes at a CPU cost!",
     if let Some(ref player) = streaming_player {
       let event_rx = player.get_event_channel();
       let app_for_events = Arc::clone(&app);
-      #[cfg(feature = "mpris")]
+      #[cfg(all(feature = "mpris", target_os = "linux"))]
       tokio::spawn(async move {
         handle_player_events(
           event_rx,
@@ -601,7 +601,7 @@ of the app. Beware that this comes at a CPU cost!",
         )
         .await;
       });
-      #[cfg(not(feature = "mpris"))]
+      #[cfg(not(all(feature = "mpris", target_os = "linux")))]
       tokio::spawn(async move {
         handle_player_events(
           event_rx,
@@ -641,7 +641,7 @@ of the app. Beware that this comes at a CPU cost!",
       start_tokio(sync_io_rx, &mut network).await;
     });
     // The UI must run in the "main" thread
-    #[cfg(all(feature = "streaming", feature = "mpris"))]
+    #[cfg(all(feature = "streaming", feature = "mpris", target_os = "linux"))]
     start_ui(
       user_config,
       &cloned_app,
@@ -649,7 +649,10 @@ of the app. Beware that this comes at a CPU cost!",
       mpris_for_ui,
     )
     .await?;
-    #[cfg(all(feature = "streaming", not(feature = "mpris")))]
+    #[cfg(all(
+      feature = "streaming",
+      not(all(feature = "mpris", target_os = "linux"))
+    ))]
     start_ui(user_config, &cloned_app, Some(shared_position_for_ui), None).await?;
     #[cfg(not(feature = "streaming"))]
     start_ui(user_config, &cloned_app, None, None).await?;
@@ -666,7 +669,7 @@ async fn start_tokio(io_rx: std::sync::mpsc::Receiver<IoEvent>, network: &mut Ne
 
 /// Handle player events from librespot and update app state directly
 /// This bypasses the Spotify Web API for instant UI updates
-#[cfg(all(feature = "streaming", feature = "mpris"))]
+#[cfg(all(feature = "streaming", feature = "mpris", target_os = "linux"))]
 async fn handle_player_events(
   mut event_rx: librespot_playback::player::PlayerEventChannel,
   app: Arc<Mutex<App>>,
@@ -891,7 +894,10 @@ async fn handle_player_events(
 
 /// Handle player events from librespot and update app state directly
 /// This bypasses the Spotify Web API for instant UI updates
-#[cfg(all(feature = "streaming", not(feature = "mpris")))]
+#[cfg(all(
+  feature = "streaming",
+  not(all(feature = "mpris", target_os = "linux"))
+))]
 async fn handle_player_events(
   mut event_rx: librespot_playback::player::PlayerEventChannel,
   app: Arc<Mutex<App>>,
@@ -1041,7 +1047,7 @@ async fn handle_player_events(
 
 /// Handle MPRIS events from external clients (media keys, playerctl, etc.)
 /// Routes control requests to the native streaming player
-#[cfg(feature = "mpris")]
+#[cfg(all(feature = "mpris", target_os = "linux"))]
 async fn handle_mpris_events(
   mut event_rx: tokio::sync::mpsc::UnboundedReceiver<mpris::MprisEvent>,
   streaming_player: Option<Arc<player::StreamingPlayer>>,
@@ -1098,7 +1104,7 @@ async fn handle_mpris_events(
   }
 }
 
-#[cfg(feature = "mpris")]
+#[cfg(all(feature = "mpris", target_os = "linux"))]
 async fn start_ui(
   user_config: UserConfig,
   app: &Arc<Mutex<App>>,
@@ -1156,7 +1162,7 @@ async fn start_ui(
       // MPRIS device change detection: When switching from native streaming to
       // an external device (like spotifyd), set MPRIS to stopped so the external
       // player's MPRIS interface takes precedence in desktop widgets
-      #[cfg(feature = "mpris")]
+      #[cfg(all(feature = "mpris", target_os = "linux"))]
       {
         let current_is_streaming_active = app.is_streaming_active;
         if prev_is_streaming_active && !current_is_streaming_active {
@@ -1355,7 +1361,7 @@ async fn start_ui(
 }
 
 /// Non-MPRIS version of start_ui - used when mpris feature is disabled
-#[cfg(not(feature = "mpris"))]
+#[cfg(not(all(feature = "mpris", target_os = "linux")))]
 async fn start_ui(
   user_config: UserConfig,
   app: &Arc<Mutex<App>>,

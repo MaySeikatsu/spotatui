@@ -1,6 +1,8 @@
 use super::analyzer::{create_shared_analyzer, SharedAnalyzer, SpectrumData};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, Device, Stream, StreamConfig};
+#[cfg(not(target_os = "windows"))]
+use cpal::BufferSize;
+use cpal::{Device, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
