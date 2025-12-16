@@ -1613,6 +1613,10 @@ impl Network {
 
   async fn shuffle(&mut self, desired_shuffle_state: bool) {
     let new_shuffle_state = desired_shuffle_state;
+    let is_startup_sync = {
+      let app = self.app.lock().await;
+      app.current_playback_context.is_none()
+    };
 
     // Prefer native streaming control when available AND active as playback device
     #[cfg(feature = "streaming")]
@@ -1657,6 +1661,20 @@ impl Network {
         let _ = app.user_config.save_config();
       }
       Err(e) => {
+        // On startup we try to apply the saved shuffle preference before there is any active
+        // playback device. Spotify returns a 404 in this case; don't show the error screen.
+        if is_startup_sync {
+          if let rspotify::ClientError::Http(http) = &e {
+            if let rspotify::http::HttpError::StatusCode(response) = http.as_ref() {
+              if response.status().as_u16() == 404 {
+                let mut app = self.app.lock().await;
+                app.user_config.behavior.shuffle_enabled = new_shuffle_state;
+                let _ = app.user_config.save_config();
+                return;
+              }
+            }
+          }
+        }
         self.handle_error(anyhow!(e)).await;
       }
     };
