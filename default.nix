@@ -2,7 +2,7 @@
 
   pkgs.rustPlatform.buildRustPackage rec {
     pname = "spotatui";
-    version = "0.34.2";
+    version = "0.34.3";
 
   src = pkgs.lib.cleanSource ./.;
 

@@ -1,6 +1,20 @@
 # Changelog
 
-## [0.34.2] - 2025-13-12
+## [0.34.3] - 2025-12-16
+
+### Added
+
+- **Catppuccin Mocha Theme Preset**: Added the popular Catppuccin Mocha Lavender color scheme as a new built-in theme preset (thanks @MysteriousWolf - PR #19)
+- **Nix Support**: Added Nix derivation and build instructions for Nix users (thanks @copeison - PR #16)
+  - Basic Nix derivation for building spotatui
+  - Documentation for Nix-based installation
+
+### Fixed
+
+- **ALSA Warnings and Lock Contention**: Fixed ALSA warnings and lock contention issues that could cause freezing when viewing liked songs (thanks @rawcode1337 - PR #18, fixes #17)
+- **External Device Playback Controls**: Fixed play/pause, skip, and volume controls not working when using the native Spotify app as the active playback device (fixes #14)
+
+## [0.34.2] - 2025-12-13
 
 ### Added
 
