@@ -58,7 +58,10 @@ librespot-playback = { version = "0.8", optional = true, default-features = fals
 librespot-playback = { version = "0.8", optional = true, default-features = false, features = ["rodio-backend"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-librespot-playback = { version = "0.8", optional = true, default-features = false }
+# On Windows/macOS we default to a real audio output backend.
+# Without this, librespot-playback falls back to the `pipe` sink which writes raw audio bytes
+# to stdout (breaking the TUI and producing no audible output).
+librespot-playback = { version = "0.8", optional = true, default-features = false, features = ["rodio-backend"] }
 
 # MPRIS D-Bus support (Linux only)
 [target.'cfg(target_os = "linux")'.dependencies]
