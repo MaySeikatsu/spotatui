@@ -80,7 +80,7 @@ pub fn draw_help_menu(f: &mut Frame<'_>, app: &App) {
   let format_row =
     |r: Vec<String>| -> Vec<String> { vec![format!("{:50}{:40}{:20}", r[0], r[1], r[2])] };
 
-  let help_menu_style = Style::default().fg(app.user_config.theme.text);
+  let help_menu_style = app.user_config.theme.base_style();
   let header = ["Description", "Event", "Context"];
   let header = format_row(header.iter().map(|s| s.to_string()).collect());
 
@@ -1219,10 +1219,11 @@ pub fn draw_error_screen(f: &mut Frame<'_>, app: &App) {
 
   let playing_paragraph = Paragraph::new(playing_text)
     .wrap(Wrap { trim: true })
-    .style(Style::default().fg(app.user_config.theme.text))
+    .style(app.user_config.theme.base_style())
     .block(
       Block::default()
         .borders(Borders::ALL)
+        .style(app.user_config.theme.base_style())
         .title(Span::styled(
           "Error",
           Style::default().fg(app.user_config.theme.error_border),
@@ -1534,9 +1535,10 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
           Style::default().fg(app.user_config.theme.active),
         ))
         .borders(Borders::ALL)
+        .style(app.user_config.theme.base_style())
         .border_style(Style::default().fg(app.user_config.theme.inactive)),
     )
-    .style(Style::default().fg(app.user_config.theme.text))
+    .style(app.user_config.theme.base_style())
     .highlight_style(
       Style::default()
         .fg(app.user_config.theme.active)
@@ -2011,6 +2013,7 @@ fn draw_dialog(f: &mut Frame<'_>, app: &App) {
 
       let block = Block::default()
         .borders(Borders::ALL)
+        .style(app.user_config.theme.base_style())
         .border_style(Style::default().fg(app.user_config.theme.inactive));
 
       f.render_widget(block, rect);
@@ -2034,6 +2037,7 @@ fn draw_dialog(f: &mut Frame<'_>, app: &App) {
 
       let text = Paragraph::new(text)
         .wrap(Wrap { trim: true })
+        .style(app.user_config.theme.base_style())
         .alignment(Alignment::Center);
 
       f.render_widget(text, vchunks[0]);
@@ -2225,11 +2229,12 @@ pub fn draw_update_prompt(f: &mut Frame<'_>, app: &App) {
     ];
 
     let paragraph = Paragraph::new(text)
-      .style(Style::default().fg(app.user_config.theme.text))
+      .style(app.user_config.theme.base_style())
       .alignment(Alignment::Center)
       .block(
         Block::default()
           .borders(Borders::ALL)
+          .style(app.user_config.theme.base_style())
           .border_style(Style::default().fg(app.user_config.theme.active))
           .title(" Update Available "),
       );

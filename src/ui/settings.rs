@@ -43,7 +43,7 @@ fn draw_category_tabs(f: &mut Frame<'_>, app: &App, area: Rect) {
         .fg(app.user_config.theme.selected)
         .add_modifier(Modifier::BOLD),
     )
-    .style(Style::default().fg(app.user_config.theme.text));
+    .style(app.user_config.theme.base_style());
 
   f.render_widget(tabs, area);
 }
@@ -129,6 +129,7 @@ fn draw_settings_list(f: &mut Frame<'_>, app: &App, area: Rect) {
     Block::default()
       .borders(Borders::ALL)
       .title(title)
+      .style(app.user_config.theme.base_style())
       .border_style(Style::default().fg(app.user_config.theme.inactive)),
   );
 
@@ -152,11 +153,16 @@ fn draw_settings_help(f: &mut Frame<'_>, app: &App, area: Rect) {
   };
 
   let help = Paragraph::new(help_text)
-    .style(Style::default().fg(app.user_config.theme.hint))
+    .style(
+      Style::default()
+        .fg(app.user_config.theme.hint)
+        .bg(app.user_config.theme.background),
+    )
     .block(
       Block::default()
         .borders(Borders::ALL)
         .title("Controls")
+        .style(app.user_config.theme.base_style())
         .border_style(Style::default().fg(app.user_config.theme.inactive)),
     );
 
