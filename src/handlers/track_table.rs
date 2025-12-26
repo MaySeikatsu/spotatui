@@ -194,6 +194,10 @@ pub fn handler(key: Key, app: &mut App) {
       handle_recommended_tracks(app);
     }
     _ if key == app.user_config.keys.add_item_to_queue => on_queue(app),
+    // Open sort menu
+    Key::Char(',') => {
+      super::sort_menu::open_sort_menu(app, crate::sort::SortContext::PlaylistTracks);
+    }
     _ => {}
   }
 }

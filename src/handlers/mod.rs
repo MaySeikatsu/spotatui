@@ -21,6 +21,7 @@ mod recently_played;
 mod search_results;
 mod select_device;
 mod settings;
+mod sort_menu;
 mod track_table;
 mod update_prompt;
 
@@ -182,6 +183,9 @@ fn handle_block_events(key: Key, app: &mut App) {
     ActiveBlock::Settings => {
       settings::handler(key, app);
     }
+    ActiveBlock::SortMenu => {
+      sort_menu::handler(key, app);
+    }
   }
 }
 
@@ -205,6 +209,12 @@ fn handle_escape(app: &mut App) {
     ActiveBlock::SelectDevice | ActiveBlock::Analysis => {}
     // Update prompt must be dismissed with Enter/Esc, not global escape
     ActiveBlock::UpdatePrompt => {}
+    // Sort menu closes on escape
+    ActiveBlock::SortMenu => {
+      app.sort_menu_visible = false;
+      app.sort_context = None;
+      app.set_current_route_state(Some(ActiveBlock::Empty), None);
+    }
     _ => {
       app.set_current_route_state(Some(ActiveBlock::Empty), None);
     }
