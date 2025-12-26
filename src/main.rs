@@ -41,6 +41,7 @@ mod network;
 #[cfg(feature = "streaming")]
 mod player;
 mod redirect_uri;
+mod sort;
 mod ui;
 mod user_config;
 

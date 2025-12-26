@@ -76,6 +76,10 @@ pub fn handler(key: Key, app: &mut App) {
     }
     k if k == app.user_config.keys.next_page => app.get_current_user_saved_artists_next(),
     k if k == app.user_config.keys.previous_page => app.get_current_user_saved_artists_previous(),
+    // Open sort menu
+    Key::Char(',') => {
+      super::sort_menu::open_sort_menu(app, crate::sort::SortContext::SavedArtists);
+    }
     _ => {}
   }
 }

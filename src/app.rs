@@ -1,6 +1,7 @@
 use super::user_config::UserConfig;
 use crate::cli::UpdateInfo;
 use crate::network::IoEvent;
+use crate::sort::{SortContext, SortState};
 use anyhow::anyhow;
 use ratatui::layout::Rect;
 use rspotify::{
@@ -140,6 +141,7 @@ pub enum ActiveBlock {
   Dialog(DialogContext),
   UpdatePrompt,
   Settings,
+  SortMenu,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -503,6 +505,17 @@ pub struct App {
   pub discover_time_range: DiscoverTimeRange,
   /// Whether we're currently loading discover data
   pub discover_loading: bool,
+  // Sort menu state
+  /// Whether the sort menu popup is visible
+  pub sort_menu_visible: bool,
+  /// Currently selected sort option in the menu
+  pub sort_menu_selected: usize,
+  /// Current sort context (what we're sorting)
+  pub sort_context: Option<SortContext>,
+  /// Current sort state per context
+  pub playlist_sort: SortState,
+  pub album_sort: SortState,
+  pub artist_sort: SortState,
 }
 
 impl Default for App {
@@ -609,6 +622,13 @@ impl Default for App {
       is_streaming_active: false,
       native_device_id: None,
       native_is_playing: None,
+      // Sort menu defaults
+      sort_menu_visible: false,
+      sort_menu_selected: 0,
+      sort_context: None,
+      playlist_sort: SortState::new(),
+      album_sort: SortState::new(),
+      artist_sort: SortState::new(),
     }
   }
 }

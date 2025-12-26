@@ -116,6 +116,8 @@ pub enum IoEvent {
   GetUserTopTracks(crate::app::DiscoverTimeRange),
   /// Get Top Artists Mix - fetches top artists and their top tracks
   GetTopArtistsMix,
+  /// Fetch all playlist tracks and apply sorting
+  FetchAllPlaylistTracksAndSort(PlaylistId<'static>),
 }
 
 pub struct Network {
@@ -423,6 +425,9 @@ impl Network {
       }
       IoEvent::GetTopArtistsMix => {
         self.get_top_artists_mix().await;
+      }
+      IoEvent::FetchAllPlaylistTracksAndSort(playlist_id) => {
+        self.fetch_all_playlist_tracks_and_sort(playlist_id).await;
       }
     };
 
@@ -1455,6 +1460,120 @@ impl Network {
       }
       offset += large_search_limit;
     }
+  }
+
+  /// Fetch all tracks from a playlist and apply sorting
+  async fn fetch_all_playlist_tracks_and_sort(&mut self, playlist_id: PlaylistId<'_>) {
+    use rspotify::model::PlayableItem;
+
+    // Get current playlist total and sort state
+    let (total, sort_state) = {
+      let app = self.app.lock().await;
+      let total = app.playlist_tracks.as_ref().map(|p| p.total).unwrap_or(0);
+      let sort_state = app.playlist_sort;
+      (total, sort_state)
+    };
+
+    if total == 0 {
+      return;
+    }
+
+    // Collect all playlist items
+    let mut all_items: Vec<rspotify::model::playlist::PlaylistItem> = Vec::new();
+    let mut offset = 0;
+
+    while offset < total {
+      match self
+        .spotify
+        .playlist_items_manual(
+          playlist_id.clone(),
+          None,
+          None,
+          Some(self.large_search_limit),
+          Some(offset),
+        )
+        .await
+      {
+        Ok(page) => {
+          all_items.extend(page.items);
+        }
+        Err(_e) => {
+          break;
+        }
+      }
+      offset += self.large_search_limit;
+    }
+
+    // Sort all items
+    all_items.sort_by(|a, b| {
+      let track_a = a.track.as_ref().and_then(|t| match t {
+        PlayableItem::Track(track) => Some(track),
+        PlayableItem::Episode(_) => None,
+      });
+      let track_b = b.track.as_ref().and_then(|t| match t {
+        PlayableItem::Track(track) => Some(track),
+        PlayableItem::Episode(_) => None,
+      });
+
+      let cmp = match (track_a, track_b) {
+        (Some(ta), Some(tb)) => match sort_state.field {
+          crate::sort::SortField::Default => std::cmp::Ordering::Equal,
+          crate::sort::SortField::Name => ta.name.to_lowercase().cmp(&tb.name.to_lowercase()),
+          crate::sort::SortField::Artist => {
+            let artist_a = ta
+              .artists
+              .first()
+              .map(|ar| ar.name.to_lowercase())
+              .unwrap_or_default();
+            let artist_b = tb
+              .artists
+              .first()
+              .map(|ar| ar.name.to_lowercase())
+              .unwrap_or_default();
+            artist_a.cmp(&artist_b)
+          }
+          crate::sort::SortField::Album => ta
+            .album
+            .name
+            .to_lowercase()
+            .cmp(&tb.album.name.to_lowercase()),
+          crate::sort::SortField::Duration => ta.duration.cmp(&tb.duration),
+          crate::sort::SortField::DateAdded => a.added_at.cmp(&b.added_at),
+        },
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+      };
+
+      if sort_state.order == crate::sort::SortOrder::Descending {
+        cmp.reverse()
+      } else {
+        cmp
+      }
+    });
+
+    // Extract tracks and update app state
+    let sorted_tracks: Vec<rspotify::model::FullTrack> = all_items
+      .iter()
+      .filter_map(|item| item.track.as_ref())
+      .filter_map(|track| match track {
+        PlayableItem::Track(full_track) => Some(full_track.clone()),
+        PlayableItem::Episode(_) => None,
+      })
+      .collect();
+
+    // Update app state with sorted data
+    let mut app = self.app.lock().await;
+
+    // Update playlist_tracks with sorted items
+    if let Some(ref mut playlist_tracks) = app.playlist_tracks {
+      playlist_tracks.items = all_items;
+      playlist_tracks.total = total;
+    }
+
+    // Update track table with sorted tracks
+    app.track_table.tracks = sorted_tracks;
+    app.track_table.selected_index = 0;
   }
 
   async fn seek(&mut self, position_ms: u32) {
