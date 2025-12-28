@@ -64,7 +64,6 @@ use crossterm::{
   ExecutableCommand,
 };
 use network::{IoEvent, Network};
-#[cfg_attr(all(feature = "mpris", target_os = "linux"), allow(unused_imports))]
 use ratatui::{
   backend::{Backend, CrosstermBackend},
   style::Style,
