@@ -4,8 +4,6 @@
 >
 > A community-maintained fork of [spotify-tui](https://github.com/Rigellute/spotify-tui), actively developed with new features like native streaming, synced lyrics, and real-time audio visualization.
 
-
-
 [![Crates.io](https://img.shields.io/crates/v/spotatui.svg)](https://crates.io/crates/spotatui)
 [![Upstream](https://img.shields.io/badge/upstream-Rigellute%2Fspotify--tui-blue)](https://github.com/Rigellute/spotify-tui)
 [![Songs played using Spotatui](https://img.shields.io/badge/dynamic/json?url=https://spotatui-counter.spotatui.workers.dev&query=count&label=Songs%20played%20using%20spotatui&labelColor=0b0f14&color=1ed760&logo=spotify&logoColor=1ed760&style=flat-square&cacheSeconds=600)](https://github.com/LargeModGames/spotatui)
@@ -18,6 +16,9 @@
 ### Song History
 
 ![Song History](https://spotatui-counter.spotatui.workers.dev/chart.svg)
+
+<!-- START doctoc -->
+<!-- END doctoc -->
 
 ### 🙏 Help Wanted
 
