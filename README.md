@@ -17,36 +17,41 @@
 
 ![Song History](https://spotatui-counter.spotatui.workers.dev/chart.svg)
 
-<details>
-<summary><b>📑 Table of Contents</b></summary>
+<div align="center">
+
+### 📑 Table of Contents
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [🙏 Help Wanted](#-help-wanted)
-- [⚡ Performance](#-performance)
-- [Privacy Notice](#privacy-notice)
-- [Migrating from spotify-tui](#migrating-from-spotify-tui)
-- [Installation](#installation)
-- [Connecting to Spotify](#connecting-to-spotify)
-- [Usage](#usage)
-- [Native Streaming](#native-streaming)
-- [Configuration](#configuration)
-- [Limitations](#limitations)
-  - [Deprecated Spotify API Features](#deprecated-spotify-api-features)
-- [Using with spotifyd](#using-with-spotifyd)
-- [Libraries used](#libraries-used)
-- [Development](#development)
-  - [Windows Subsystem for Linux](#windows-subsystem-for-linux)
-- [Maintainer](#maintainer)
-- [spotatui Contributors](#spotatui-contributors)
-- [Upstream Contributors (spotify-tui)](#upstream-contributors-spotify-tui)
-- [Star History](#star-history)
-- [Roadmap](#roadmap)
+- [spotatui](#spotatui)
+  - [Song History](#song-history)
+    - [📑 Table of Contents](#-table-of-contents)
+  - [🙏 Help Wanted](#-help-wanted)
+  - [⚡ Performance](#-performance)
+  - [Privacy Notice](#privacy-notice)
+  - [Migrating from spotify-tui](#migrating-from-spotify-tui)
+  - [Installation](#installation)
+  - [Connecting to Spotify](#connecting-to-spotify)
+  - [Usage](#usage)
+  - [Native Streaming](#native-streaming)
+  - [Configuration](#configuration)
+  - [Limitations](#limitations)
+    - [Deprecated Spotify API Features](#deprecated-spotify-api-features)
+  - [Using with spotifyd](#using-with-spotifyd)
+  - [Libraries used](#libraries-used)
+  - [Development](#development)
+    - [Windows Subsystem for Linux](#windows-subsystem-for-linux)
+  - [Maintainer](#maintainer)
+  - [spotatui Contributors](#spotatui-contributors)
+  - [Upstream Contributors (spotify-tui)](#upstream-contributors-spotify-tui)
+  - [Star History](#star-history)
+  - [Roadmap](#roadmap)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-</details>
+</div>
+
 
 ## 🙏 Help Wanted
 
