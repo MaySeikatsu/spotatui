@@ -26,7 +26,6 @@ mod alsa_silence {
 }
 
 mod app;
-#[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
 mod audio;
 mod banner;
 mod cli;
@@ -58,16 +57,11 @@ use crossterm::{
   cursor::MoveTo,
   event::{DisableMouseCapture, EnableMouseCapture},
   execute,
-  terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
-  },
+  terminal::SetTitle,
   ExecutableCommand,
 };
 use network::{IoEvent, Network};
-use ratatui::{
-  backend::{Backend, CrosstermBackend},
-  Terminal,
-};
+use ratatui::backend::Backend;
 use redirect_uri::redirect_uri_web_server;
 use rspotify::{
   prelude::*,
@@ -134,13 +128,6 @@ async fn load_token_from_file(spotify: &AuthCodeSpotify, path: &PathBuf) -> Resu
   Ok(true)
 }
 
-fn close_application() -> Result<()> {
-  disable_raw_mode()?;
-  let mut stdout = io::stdout();
-  execute!(stdout, LeaveAlternateScreen, DisableMouseCapture)?;
-  Ok(())
-}
-
 #[cfg(all(target_os = "linux", feature = "streaming"))]
 fn init_audio_backend() {
   alsa_silence::suppress_alsa_errors();
@@ -152,9 +139,7 @@ fn init_audio_backend() {}
 fn install_panic_hook() {
   let default_hook = panic::take_hook();
   panic::set_hook(Box::new(move |info| {
-    let _ = disable_raw_mode();
-    let mut stdout = io::stdout();
-    let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
+    ratatui::restore();
     let panic_log_path = dirs::home_dir().map(|home| {
       home
         .join(".config")
@@ -1247,29 +1232,23 @@ async fn start_ui(
   mpris_manager: Option<Arc<mpris::MprisManager>>,
 ) -> Result<()> {
   // Terminal initialization
-  let mut stdout = stdout();
-  execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-  enable_raw_mode()?;
-
-  let mut backend = CrosstermBackend::new(stdout);
+  let mut terminal = ratatui::init();
+  execute!(stdout(), EnableMouseCapture)?;
 
   if user_config.behavior.set_window_title {
-    backend.execute(SetTitle("spt - spotatui"))?;
+    execute!(stdout(), SetTitle("spt - spotatui"))?;
   }
 
-  let mut terminal = Terminal::new(backend)?;
-  terminal.hide_cursor()?;
-
   let events = event::Events::new(user_config.behavior.tick_rate_milliseconds);
-
-  // Audio capture is initialized lazily - only when entering visualization view
-  #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-  let mut audio_capture: Option<audio::AudioCaptureManager> = None;
 
   // Track previous streaming state to detect device changes for MPRIS
   // When switching from native streaming to external device (like spotifyd),
   // we set MPRIS to stopped so the external player's MPRIS takes precedence
   let mut prev_is_streaming_active = false;
+
+  // Lazy audio capture: only capture when in Analysis view
+  #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+  let mut audio_capture: Option<audio::AudioCaptureManager> = None;
 
   // Check for updates SYNCHRONOUSLY before starting the event loop
   // This ensures the update prompt appears before any user interaction
@@ -1445,13 +1424,11 @@ async fn start_ui(
           let in_analysis_view = app.get_current_route().active_block == ActiveBlock::Analysis;
 
           if in_analysis_view {
-            // Start capture if not already running
             if audio_capture.is_none() {
               audio_capture = audio::AudioCaptureManager::new();
               app.audio_capture_active = audio_capture.is_some();
             }
 
-            // Update spectrum data
             if let Some(ref capture) = audio_capture {
               if let Some(spectrum) = capture.get_spectrum() {
                 app.spectrum_data = Some(app::SpectrumData {
@@ -1461,13 +1438,10 @@ async fn start_ui(
                 app.audio_capture_active = capture.is_active();
               }
             }
-          } else {
-            // Stop capture when leaving Analysis view
-            if audio_capture.is_some() {
-              audio_capture = None;
-              app.audio_capture_active = false;
-              app.spectrum_data = None;
-            }
+          } else if audio_capture.is_some() {
+            audio_capture = None;
+            app.audio_capture_active = false;
+            app.spectrum_data = None;
           }
         }
       }
@@ -1489,8 +1463,8 @@ async fn start_ui(
     }
   }
 
-  terminal.show_cursor()?;
-  close_application()?;
+  execute!(stdout(), DisableMouseCapture)?;
+  ratatui::restore();
 
   Ok(())
 }
@@ -1506,24 +1480,14 @@ async fn start_ui(
   use ratatui::{prelude::Style, widgets::Block};
 
   // Terminal initialization
-  let mut stdout = stdout();
-  execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-  enable_raw_mode()?;
-
-  let mut backend = CrosstermBackend::new(stdout);
+  let mut terminal = ratatui::init();
+  execute!(stdout(), EnableMouseCapture)?;
 
   if user_config.behavior.set_window_title {
-    backend.execute(SetTitle("spt - spotatui"))?;
+    execute!(stdout(), SetTitle("spt - spotatui"))?;
   }
 
-  let mut terminal = Terminal::new(backend)?;
-  terminal.hide_cursor()?;
-
   let events = event::Events::new(user_config.behavior.tick_rate_milliseconds);
-
-  // Audio capture is initialized lazily - only when entering visualization view
-  #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
-  let mut audio_capture: Option<audio::AudioCaptureManager> = None;
 
   // Check for updates SYNCHRONOUSLY before starting the event loop
   {
@@ -1537,6 +1501,10 @@ async fn start_ui(
       app.push_navigation_stack(RouteId::UpdatePrompt, ActiveBlock::UpdatePrompt);
     }
   }
+
+  // Lazy audio capture: only capture when in Analysis view
+  #[cfg(any(feature = "audio-viz", feature = "audio-viz-cpal"))]
+  let mut audio_capture: Option<audio::AudioCaptureManager> = None;
 
   let mut is_first_render = true;
 
@@ -1573,7 +1541,7 @@ async fn start_ui(
       terminal.draw(|f| {
         f.render_widget(
           Block::default().style(Style::default().bg(app.user_config.theme.background)),
-          f.size(),
+          f.area(),
         );
         match current_route.active_block {
           ActiveBlock::HelpMenu => ui::draw_help_menu(f, &app),
@@ -1654,13 +1622,11 @@ async fn start_ui(
           let in_analysis_view = app.get_current_route().active_block == ActiveBlock::Analysis;
 
           if in_analysis_view {
-            // Start capture if not already running
             if audio_capture.is_none() {
               audio_capture = audio::AudioCaptureManager::new();
               app.audio_capture_active = audio_capture.is_some();
             }
 
-            // Update spectrum data
             if let Some(ref capture) = audio_capture {
               if let Some(spectrum) = capture.get_spectrum() {
                 app.spectrum_data = Some(app::SpectrumData {
@@ -1670,13 +1636,10 @@ async fn start_ui(
                 app.audio_capture_active = capture.is_active();
               }
             }
-          } else {
-            // Stop capture when leaving Analysis view
-            if audio_capture.is_some() {
-              audio_capture = None;
-              app.audio_capture_active = false;
-              app.spectrum_data = None;
-            }
+          } else if audio_capture.is_some() {
+            audio_capture = None;
+            app.audio_capture_active = false;
+            app.spectrum_data = None;
           }
         }
       }
@@ -1695,8 +1658,8 @@ async fn start_ui(
     }
   }
 
-  terminal.show_cursor()?;
-  close_application()?;
+  execute!(stdout(), DisableMouseCapture)?;
+  ratatui::restore();
 
   Ok(())
 }

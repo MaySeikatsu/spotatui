@@ -3,7 +3,7 @@ use crate::cli::UpdateInfo;
 use crate::network::IoEvent;
 use crate::sort::{SortContext, SortState};
 use anyhow::anyhow;
-use ratatui::layout::Rect;
+use ratatui::layout::Size;
 use rspotify::{
   model::enums::Country,
   model::{
@@ -449,7 +449,7 @@ pub struct App {
   pub selected_device_index: Option<usize>,
   pub selected_playlist_index: Option<usize>,
   pub active_playlist_index: Option<usize>,
-  pub size: Rect,
+  pub size: Size,
   #[allow(dead_code)]
   pub small_search_limit: u32,
   pub song_progress_ms: u128,
@@ -516,6 +516,8 @@ pub struct App {
   pub playlist_sort: SortState,
   pub album_sort: SortState,
   pub artist_sort: SortState,
+  /// Animation frame counter for the "Liked" heart flash effect (0-10)
+  pub liked_song_animation_frame: Option<u8>,
 }
 
 impl Default for App {
@@ -538,7 +540,7 @@ impl Default for App {
       user_config: UserConfig::new(),
       saved_album_tracks_index: 0,
       recently_played: Default::default(),
-      size: Rect::default(),
+      size: Size::default(),
       selected_album_simplified: None,
       selected_album_full: None,
       home_scroll: 0,
@@ -629,6 +631,7 @@ impl Default for App {
       playlist_sort: SortState::new(),
       album_sort: SortState::new(),
       artist_sort: SortState::new(),
+      liked_song_animation_frame: None,
     }
   }
 }
@@ -711,6 +714,14 @@ impl App {
   }
 
   pub fn update_on_tick(&mut self) {
+    if let Some(frame) = self.liked_song_animation_frame {
+      if frame > 0 {
+        self.liked_song_animation_frame = Some(frame - 1);
+      } else {
+        self.liked_song_animation_frame = None;
+      }
+    }
+
     self.poll_current_playback();
 
     if let Some(CurrentPlaybackContext {

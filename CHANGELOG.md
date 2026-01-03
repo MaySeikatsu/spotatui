@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.35.0] - 2026-01-03
+
+### Added
+
+- **Audio Visualization**: Real-time audio visualization with multiple display styles (requires `audio-viz` or `audio-viz-cpal` feature)
+  - **Equalizer Mode**: Uses `tui-equalizer` with half-block bars and brightness effect
+  - **Bar Graph Mode**: Uses `tui-bar-graph` with full-height vertical bars
+  - Visualizer style can be configured in `config.yml` under `behavior.visualizer_style`
+  - Supports custom color gradients via `colorgrad` integration
+  - Dynamic frequency analysis displays while audio is playing
+- **tui-equalizer Integration**: Added Josh McKinney's `tui-equalizer` widget for modern audio visualization
+- **tui-bar-graph Integration**: Added Josh McKinney's `tui-bar-graph` widget for alternative visualization style
+- **Dynamic Theme Gradients**: The home banner now features a dynamic, animated gradient that adapts to your current theme's colors
+- **Heart Burst Animation**: Added a "heart burst" animation when liking a track for better visual feedback
+
+### Changed
+
+- **Upgraded to Ratatui 0.30**: Major framework upgrade from Ratatui 0.26 to 0.30
+  - Replaced deprecated `Frame::size()` with `Frame::area()` across all UI components
+  - Updated `App` size field to use `ratatui::layout::Size`
+  - Refactored terminal initialization and main event loop for new Frame API
+- **Upgraded to Crossterm 0.29**: Updated from Crossterm 0.27 to 0.29 for improved terminal handling
+- **Modernized UI Aesthetics**: Refactored UI rendering for cleaner, more modern appearance
+- **Audio Capture Lifecycle**: Refactored lazy audio capture initialization for better resource management
+- **Unified Border Styles**: Standardized all UI borders (Home, Search, Playbar, Lists) to use `Rounded` corners for a more modern and consistent look
+
+### Internal
+
+- Added comprehensive `docs/RATATUI_0.30_CONVERSION.md` documenting the upgrade process
+- Updated audio-viz feature flags to include new visualization dependencies
+- Improved audio analysis widget architecture for better extensibility
+
 ## [0.34.6] - 2025-12-26
 
 ### Added

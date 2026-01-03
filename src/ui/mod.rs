@@ -9,12 +9,16 @@ use super::{
   },
   banner::BANNER,
 };
+use colorgrad::{self, Gradient};
 use help::get_help_docs;
 use ratatui::{
   layout::{Alignment, Constraint, Direction, Layout, Rect},
   style::{Color, Modifier, Style},
   text::{Line, Span, Text},
-  widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Table, Wrap},
+  widgets::{
+    canvas::Canvas, Block, BorderType, Borders, Clear, LineGauge, List, ListItem, ListState,
+    Paragraph, Row, Table, Wrap,
+  },
   Frame,
 };
 use rspotify::model::enums::RepeatState;
@@ -69,11 +73,9 @@ pub struct TableItem {
 }
 
 pub fn draw_help_menu(f: &mut Frame<'_>, app: &App) {
-  let chunks = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints([Constraint::Percentage(100)].as_ref())
-    .margin(2)
-    .split(f.size());
+  let [area] = f
+    .area()
+    .layout(&Layout::vertical([Constraint::Percentage(100)]).margin(2));
 
   // Create a one-column table to avoid flickering due to non-determinism when
   // resolving constraints on widths of table columns.
@@ -108,22 +110,20 @@ pub fn draw_help_menu(f: &mut Frame<'_>, app: &App) {
         .border_style(help_menu_style),
     )
     .style(help_menu_style);
-  f.render_widget(help_menu, chunks[0]);
+  f.render_widget(help_menu, area);
 }
 
 pub fn draw_input_and_help_box(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  // Check for the width and change the contraints accordingly
-  let chunks = Layout::default()
-    .direction(Direction::Horizontal)
-    .constraints(
-      if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar
-      {
-        [Constraint::Percentage(65), Constraint::Percentage(35)].as_ref()
-      } else {
-        [Constraint::Percentage(90), Constraint::Percentage(10)].as_ref()
-      },
-    )
-    .split(layout_chunk);
+  // Check for the width and change the constraints accordingly
+  let constraints = if app.size.width >= SMALL_TERMINAL_WIDTH
+    && !app.user_config.behavior.enforce_wide_search_bar
+  {
+    [Constraint::Percentage(65), Constraint::Percentage(35)]
+  } else {
+    [Constraint::Percentage(90), Constraint::Percentage(10)]
+  };
+
+  let [input_area, help_area] = layout_chunk.layout(&Layout::horizontal(constraints));
 
   let current_route = app.get_current_route();
 
@@ -132,11 +132,19 @@ pub fn draw_input_and_help_box(f: &mut Frame<'_>, app: &App, layout_chunk: Rect)
     current_route.hovered_block == ActiveBlock::Input,
   );
 
+  let show_loading = app.is_loading && app.user_config.behavior.show_loading_indicator;
+  let border_type = if show_loading {
+    BorderType::Double
+  } else {
+    BorderType::Rounded
+  };
+
   let input_string: String = app.input.iter().collect();
   let lines = Text::from(input_string.clone());
   let input = Paragraph::new(lines).block(
     Block::default()
       .borders(Borders::ALL)
+      .border_type(border_type)
       .title(Span::styled(
         "Search",
         get_color(highlight_state, app.user_config.theme),
@@ -144,9 +152,8 @@ pub fn draw_input_and_help_box(f: &mut Frame<'_>, app: &App, layout_chunk: Rect)
       .style(app.user_config.theme.base_style())
       .border_style(get_color(highlight_state, app.user_config.theme)),
   );
-  f.render_widget(input, chunks[0]);
+  f.render_widget(input, input_area);
 
-  let show_loading = app.is_loading && app.user_config.behavior.show_loading_indicator;
   let help_block_text = if show_loading {
     (app.user_config.theme.hint, "Loading...")
   } else {
@@ -156,6 +163,7 @@ pub fn draw_input_and_help_box(f: &mut Frame<'_>, app: &App, layout_chunk: Rect)
   let block = Block::default()
     .title(Span::styled("Help", Style::default().fg(help_block_text.0)))
     .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
     .border_style(Style::default().fg(help_block_text.0));
 
   let lines = Text::from(help_block_text.1);
@@ -164,46 +172,40 @@ pub fn draw_input_and_help_box(f: &mut Frame<'_>, app: &App, layout_chunk: Rect)
       .fg(help_block_text.0)
       .bg(app.user_config.theme.background),
   );
-  f.render_widget(help, chunks[1]);
+  f.render_widget(help, help_area);
 }
 
 pub fn draw_main_layout(f: &mut Frame<'_>, app: &App) {
   let margin = util::get_main_layout_margin(app);
   // Responsive layout: new one kicks in at width 150 or higher
   if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar {
-    let parent_layout = Layout::default()
-      .direction(Direction::Vertical)
-      .constraints([Constraint::Min(1), Constraint::Length(6)].as_ref())
-      .margin(margin)
-      .split(f.size());
+    let [routes_area, playbar_area] = f
+      .area()
+      .layout(&Layout::vertical([Constraint::Min(1), Constraint::Length(6)]).margin(margin));
 
     // Nested main block with potential routes
-    draw_routes(f, app, parent_layout[0]);
+    draw_routes(f, app, routes_area);
 
     // Currently playing
-    draw_playbar(f, app, parent_layout[1]);
+    draw_playbar(f, app, playbar_area);
   } else {
-    let parent_layout = Layout::default()
-      .direction(Direction::Vertical)
-      .constraints(
-        [
-          Constraint::Length(3),
-          Constraint::Min(1),
-          Constraint::Length(6),
-        ]
-        .as_ref(),
-      )
-      .margin(margin)
-      .split(f.size());
+    let [input_area, routes_area, playbar_area] = f.area().layout(
+      &Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(1),
+        Constraint::Length(6),
+      ])
+      .margin(margin),
+    );
 
     // Search input and help
-    draw_input_and_help_box(f, app, parent_layout[0]);
+    draw_input_and_help_box(f, app, input_area);
 
     // Nested main block with potential routes
-    draw_routes(f, app, parent_layout[1]);
+    draw_routes(f, app, routes_area);
 
     // Currently playing
-    draw_playbar(f, app, parent_layout[2]);
+    draw_playbar(f, app, playbar_area);
   }
 
   // Possibly draw confirm dialog
@@ -214,51 +216,51 @@ pub fn draw_main_layout(f: &mut Frame<'_>, app: &App) {
 }
 
 pub fn draw_routes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let chunks = Layout::default()
-    .direction(Direction::Horizontal)
-    .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
-    .split(layout_chunk);
+  let [user_area, content_area] = layout_chunk.layout(&Layout::horizontal([
+    Constraint::Percentage(20),
+    Constraint::Percentage(80),
+  ]));
 
-  draw_user_block(f, app, chunks[0]);
+  draw_user_block(f, app, user_area);
 
   let current_route = app.get_current_route();
 
   match current_route.id {
     RouteId::Search => {
-      draw_search_results(f, app, chunks[1]);
+      draw_search_results(f, app, content_area);
     }
     RouteId::TrackTable => {
-      draw_song_table(f, app, chunks[1]);
+      draw_song_table(f, app, content_area);
     }
     RouteId::AlbumTracks => {
-      draw_album_table(f, app, chunks[1]);
+      draw_album_table(f, app, content_area);
     }
     RouteId::RecentlyPlayed => {
-      draw_recently_played_table(f, app, chunks[1]);
+      draw_recently_played_table(f, app, content_area);
     }
     RouteId::Artist => {
-      draw_artist_albums(f, app, chunks[1]);
+      draw_artist_albums(f, app, content_area);
     }
     RouteId::AlbumList => {
-      draw_album_list(f, app, chunks[1]);
+      draw_album_list(f, app, content_area);
     }
     RouteId::PodcastEpisodes => {
-      draw_show_episodes(f, app, chunks[1]);
+      draw_show_episodes(f, app, content_area);
     }
     RouteId::Home => {
-      draw_home(f, app, chunks[1]);
+      draw_home(f, app, content_area);
     }
     RouteId::Discover => {
-      draw_discover(f, app, chunks[1]);
+      draw_discover(f, app, content_area);
     }
     RouteId::Artists => {
-      draw_artist_table(f, app, chunks[1]);
+      draw_artist_table(f, app, content_area);
     }
     RouteId::Podcasts => {
-      draw_podcast_table(f, app, chunks[1]);
+      draw_podcast_table(f, app, content_area);
     }
     RouteId::Recommendations => {
-      draw_recommendations_table(f, app, chunks[1]);
+      draw_recommendations_table(f, app, content_area);
     }
     RouteId::Error => {} // This is handled as a "full screen" route in main.rs
     RouteId::SelectedDevice => {} // This is handled as a "full screen" route in main.rs
@@ -314,52 +316,41 @@ pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 pub fn draw_user_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // Check for width to make a responsive layout
   if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar {
-    let chunks = Layout::default()
-      .direction(Direction::Vertical)
-      .constraints(
-        [
-          Constraint::Length(3),
-          Constraint::Percentage(30),
-          Constraint::Percentage(70),
-        ]
-        .as_ref(),
-      )
-      .split(layout_chunk);
+    let [input_area, library_area, playlist_area] = layout_chunk.layout(&Layout::vertical([
+      Constraint::Length(3),
+      Constraint::Percentage(30),
+      Constraint::Percentage(70),
+    ]));
 
     // Search input and help
-    draw_input_and_help_box(f, app, chunks[0]);
-    draw_library_block(f, app, chunks[1]);
-    draw_playlist_block(f, app, chunks[2]);
+    draw_input_and_help_box(f, app, input_area);
+    draw_library_block(f, app, library_area);
+    draw_playlist_block(f, app, playlist_area);
   } else {
-    let chunks = Layout::default()
-      .direction(Direction::Vertical)
-      .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
-      .split(layout_chunk);
+    let [library_area, playlist_area] = layout_chunk.layout(&Layout::vertical([
+      Constraint::Percentage(30),
+      Constraint::Percentage(70),
+    ]));
 
     // Search input and help
-    draw_library_block(f, app, chunks[0]);
-    draw_playlist_block(f, app, chunks[1]);
+    draw_library_block(f, app, library_area);
+    draw_playlist_block(f, app, playlist_area);
   }
 }
 
 pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let chunks = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints(
-      [
-        Constraint::Percentage(35),
-        Constraint::Percentage(35),
-        Constraint::Percentage(25),
-      ]
-      .as_ref(),
-    )
-    .split(layout_chunk);
+  let [song_artist_area, albums_playlist_area, podcasts_area] =
+    layout_chunk.layout(&Layout::vertical([
+      Constraint::Percentage(35),
+      Constraint::Percentage(35),
+      Constraint::Percentage(25),
+    ]));
 
   {
-    let song_artist_block = Layout::default()
-      .direction(Direction::Horizontal)
-      .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-      .split(chunks[0]);
+    let [songs_area, artists_area] = song_artist_area.layout(&Layout::horizontal([
+      Constraint::Percentage(50),
+      Constraint::Percentage(50),
+    ]));
 
     let currently_playing_id = app
       .current_playback_context
@@ -401,7 +392,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     draw_selectable_list(
       f,
       app,
-      song_artist_block[0],
+      songs_area,
       "Songs",
       &songs,
       get_search_results_highlight_state(app, SearchResultBlock::SongSearch),
@@ -427,7 +418,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     draw_selectable_list(
       f,
       app,
-      song_artist_block[1],
+      artists_area,
       "Artists",
       &artists,
       get_search_results_highlight_state(app, SearchResultBlock::ArtistSearch),
@@ -436,10 +427,10 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   }
 
   {
-    let albums_playlist_block = Layout::default()
-      .direction(Direction::Horizontal)
-      .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-      .split(chunks[1]);
+    let [albums_area, playlist_area] = albums_playlist_area.layout(&Layout::horizontal([
+      Constraint::Percentage(50),
+      Constraint::Percentage(50),
+    ]));
 
     let albums = match &app.search_results.albums {
       Some(albums) => albums
@@ -467,7 +458,7 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     draw_selectable_list(
       f,
       app,
-      albums_playlist_block[0],
+      albums_area,
       "Albums",
       &albums,
       get_search_results_highlight_state(app, SearchResultBlock::AlbumSearch),
@@ -503,12 +494,12 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
               app.user_config.theme,
             )),
         );
-      f.render_widget(warning_paragraph, albums_playlist_block[1]);
+      f.render_widget(warning_paragraph, playlist_area);
     } else {
       draw_selectable_list(
         f,
         app,
-        albums_playlist_block[1],
+        playlist_area,
         "Playlists",
         &playlists,
         get_search_results_highlight_state(app, SearchResultBlock::PlaylistSearch),
@@ -518,32 +509,26 @@ pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   }
 
   {
-    let podcasts_block = Layout::default()
-      .direction(Direction::Horizontal)
-      .constraints([Constraint::Percentage(100)].as_ref())
-      .split(chunks[2]);
-
-    let podcasts = match &app.search_results.shows {
-      Some(podcasts) => podcasts
-        .items
-        .iter()
-        .map(|item| {
-          let mut show_name = String::new();
-          if app.saved_show_ids_set.contains(item.id.id()) {
-            show_name.push_str(&app.user_config.padded_liked_icon());
-          }
-          show_name.push_str(&format!("{:} - {}", item.name, item.publisher));
-          show_name
-        })
-        .collect(),
-      None => vec![],
-    };
     draw_selectable_list(
       f,
       app,
-      podcasts_block[0],
+      podcasts_area,
       "Podcasts",
-      &podcasts,
+      &match &app.search_results.shows {
+        Some(podcasts) => podcasts
+          .items
+          .iter()
+          .map(|item| {
+            let mut show_name = String::new();
+            if app.saved_show_ids_set.contains(item.id.id()) {
+              show_name.push_str(&app.user_config.padded_liked_icon());
+            }
+            show_name.push_str(&format!("{:} - {}", item.name, item.publisher));
+            show_name
+          })
+          .collect(),
+        None => vec![],
+      },
       get_search_results_highlight_state(app, SearchResultBlock::ShowSearch),
       app.search_results.selected_shows_index,
     );
@@ -916,7 +901,7 @@ pub fn draw_basic_view(f: &mut Frame<'_>, app: &App) {
       ]
       .as_ref(),
     )
-    .split(f.size());
+    .split(f.area());
 
   draw_lyrics(f, app, chunks[0]);
   draw_playbar(f, app, chunks[1]);
@@ -1022,18 +1007,14 @@ fn draw_lyrics(f: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let chunks = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints(
-      [
-        Constraint::Percentage(50),
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
-      ]
-      .as_ref(),
-    )
-    .margin(1)
-    .split(layout_chunk);
+  let [artist_area, _, progress_area] = layout_chunk.layout(
+    &Layout::vertical([
+      Constraint::Percentage(50),
+      Constraint::Percentage(25),
+      Constraint::Percentage(25),
+    ])
+    .margin(1),
+  );
 
   // If no track is playing, render paragraph showing which device is selected, if no selected
   // give hint to choose a device
@@ -1076,6 +1057,7 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 
       let title_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .style(Style::default().bg(app.user_config.theme.playbar_background))
         .title(Span::styled(
           &title,
@@ -1144,7 +1126,7 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
               .add_modifier(Modifier::BOLD),
           )),
         );
-      f.render_widget(artist, chunks[0]);
+      f.render_widget(artist, artist_area);
 
       let progress_ms = match app.seek_ms {
         Some(seek_ms) => seek_ms,
@@ -1160,19 +1142,55 @@ pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
       } else {
         Modifier::empty()
       };
-      let song_progress = Gauge::default()
-        .gauge_style(
+      let song_progress = LineGauge::default()
+        .filled_style(
           Style::default()
             .fg(app.user_config.theme.playbar_progress)
-            .bg(app.user_config.theme.playbar_background)
             .add_modifier(modifier),
         )
-        .percent(perc)
+        .unfilled_style(
+          Style::default()
+            .fg(app.user_config.theme.playbar_background)
+            .add_modifier(modifier),
+        )
+        .ratio(perc as f64 / 100.0)
+        .filled_symbol("⣿")
+        .unfilled_symbol("⣉")
         .label(Span::styled(
           &song_progress_label,
           Style::default().fg(app.user_config.theme.playbar_progress_text),
         ));
-      f.render_widget(song_progress, chunks[2]);
+      f.render_widget(song_progress, progress_area);
+
+      // Draw "Like" animation (heart burst) if active
+      if let Some(frame) = app.liked_song_animation_frame {
+        let progress = (10 - frame) as f64;
+        let y_base = 20.0 + progress * 5.0; // Rise up
+
+        let canvas = Canvas::default()
+          .block(Block::default()) // No border, transparent
+          .x_bounds([0.0, 100.0])
+          .y_bounds([0.0, 100.0])
+          .paint(|ctx| {
+            let color = app.user_config.theme.selected;
+            // Center heart
+            ctx.print(50.0, y_base, Span::styled("♥", Style::default().fg(color)));
+            // Left particle (lagging slightly)
+            ctx.print(
+              48.0,
+              y_base - 3.0,
+              Span::styled("♥", Style::default().fg(color)),
+            );
+            // Right particle (lagging slightly)
+            ctx.print(
+              52.0,
+              y_base - 3.0,
+              Span::styled("♥", Style::default().fg(color)),
+            );
+          });
+
+        f.render_widget(canvas, layout_chunk);
+      }
     }
   }
 }
@@ -1182,7 +1200,7 @@ pub fn draw_error_screen(f: &mut Frame<'_>, app: &App) {
     .direction(Direction::Vertical)
     .constraints([Constraint::Percentage(100)].as_ref())
     .margin(5)
-    .split(f.size());
+    .split(f.area());
 
   let playing_text = vec![
     Line::from(vec![
@@ -1237,11 +1255,8 @@ pub fn draw_error_screen(f: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let chunks = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints([Constraint::Length(7), Constraint::Length(93)].as_ref())
-    .margin(2)
-    .split(layout_chunk);
+  let [banner_area, changelog_area] = layout_chunk
+    .layout(&Layout::vertical([Constraint::Length(7), Constraint::Length(93)]).margin(2));
 
   let current_route = app.get_current_route();
   let highlight_state = (
@@ -1256,6 +1271,7 @@ fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     ))
     .style(app.user_config.theme.base_style())
     .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
     .border_style(get_color(highlight_state, app.user_config.theme));
   f.render_widget(welcome, layout_chunk);
 
@@ -1269,14 +1285,64 @@ fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     changelog.replace("\n## [Unreleased]\n", "")
   };
 
-  // Banner text with correct styling
-  let top_text = Text::from(BANNER).patch_style(Style::default().fg(app.user_config.theme.banner));
+  // Helper to convert Ratatui Color to RGBA tuple
+  fn to_rgba(color: ratatui::style::Color) -> (u8, u8, u8, u8) {
+    match color {
+      ratatui::style::Color::Rgb(r, g, b) => (r, g, b, 255),
+      ratatui::style::Color::Black => (0, 0, 0, 255),
+      ratatui::style::Color::Red => (255, 0, 0, 255),
+      ratatui::style::Color::Green => (0, 255, 0, 255),
+      ratatui::style::Color::Yellow => (255, 255, 0, 255),
+      ratatui::style::Color::Blue => (0, 0, 255, 255),
+      ratatui::style::Color::Magenta => (255, 0, 255, 255),
+      ratatui::style::Color::Cyan => (0, 255, 255, 255),
+      ratatui::style::Color::Gray => (128, 128, 128, 255),
+      ratatui::style::Color::DarkGray => (64, 64, 64, 255),
+      ratatui::style::Color::LightRed => (255, 128, 128, 255),
+      ratatui::style::Color::LightGreen => (128, 255, 128, 255),
+      ratatui::style::Color::LightYellow => (255, 255, 128, 255),
+      ratatui::style::Color::LightBlue => (128, 128, 255, 255),
+      ratatui::style::Color::LightMagenta => (255, 128, 255, 255),
+      ratatui::style::Color::LightCyan => (128, 255, 255, 255),
+      ratatui::style::Color::White => (255, 255, 255, 255),
+      _ => (255, 255, 255, 255),
+    }
+  }
+
+  // Create dynamic gradient based on theme colors
+  // Flow: Banner Color -> Active Color -> Hovered Color
+  let c1 = to_rgba(app.user_config.theme.banner);
+  let c2 = to_rgba(app.user_config.theme.active);
+  let c3 = to_rgba(app.user_config.theme.hovered);
+
+  let grad = colorgrad::GradientBuilder::new()
+    .colors(&[
+      colorgrad::Color::from_rgba8(c1.0, c1.1, c1.2, c1.3),
+      colorgrad::Color::from_rgba8(c2.0, c2.1, c2.2, c2.3),
+      colorgrad::Color::from_rgba8(c3.0, c3.1, c3.2, c3.3),
+    ])
+    .build::<colorgrad::LinearGradient>()
+    .unwrap(); // Safe as we provide valid colors
+
+  let gradient_lines: Vec<Line> = BANNER
+    .lines()
+    .enumerate()
+    .map(|(i, line)| {
+      // Scale t to cycle through gradient
+      let t = (i as f64) / 8.0;
+      let [r, g, b, _] = grad.at(t as f32).to_rgba8();
+      Line::from(Span::styled(
+        line,
+        Style::default().fg(ratatui::style::Color::Rgb(r, g, b)),
+      ))
+    })
+    .collect();
 
   // Contains the banner
-  let top_text = Paragraph::new(top_text)
+  let top_text = Paragraph::new(gradient_lines)
     .style(app.user_config.theme.base_style())
     .block(Block::default());
-  f.render_widget(top_text, chunks[0]);
+  f.render_widget(top_text, banner_area);
 
   // Parse changelog with styling
   let changelog_lines = parse_changelog_with_style(&clean_changelog, &app.user_config.theme);
@@ -1312,7 +1378,7 @@ fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     .style(app.user_config.theme.base_style())
     .wrap(Wrap { trim: false })
     .scroll((app.home_scroll, 0));
-  f.render_widget(bottom_text, chunks[1]);
+  f.render_widget(bottom_text, changelog_area);
 }
 
 /// Parse markdown changelog and apply terminal styling
@@ -1384,17 +1450,12 @@ fn parse_changelog_with_style<'a>(
 }
 
 fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let chunks = Layout::default()
-    .direction(Direction::Horizontal)
-    .constraints(
-      [
-        Constraint::Percentage(33),
-        Constraint::Percentage(33),
-        Constraint::Percentage(33),
-      ]
-      .as_ref(),
-    )
-    .split(layout_chunk);
+  let [tracks_area, albums_area, related_artists_area] =
+    layout_chunk.layout(&Layout::horizontal([
+      Constraint::Percentage(33),
+      Constraint::Percentage(33),
+      Constraint::Percentage(33),
+    ]));
 
   if let Some(artist) = &app.artist {
     let top_tracks = artist
@@ -1421,7 +1482,7 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     draw_selectable_list(
       f,
       app,
-      chunks[0],
+      tracks_area,
       &format!("{} - Top Tracks", &artist.artist_name),
       &top_tracks,
       get_artist_highlight_state(app, ArtistBlock::TopTracks),
@@ -1452,7 +1513,7 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     draw_selectable_list(
       f,
       app,
-      chunks[1],
+      albums_area,
       "Albums",
       albums,
       get_artist_highlight_state(app, ArtistBlock::Albums),
@@ -1475,7 +1536,7 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     draw_selectable_list(
       f,
       app,
-      chunks[2],
+      related_artists_area,
       "Related artists",
       &related_artists,
       get_artist_highlight_state(app, ArtistBlock::RelatedArtists),
@@ -1485,11 +1546,9 @@ fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 }
 
 pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
-  let chunks = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
-    .margin(5)
-    .split(f.size());
+  let [instructions_area, list_area] = f
+    .area()
+    .layout(&Layout::vertical([Constraint::Percentage(20), Constraint::Percentage(80)]).margin(5));
 
   let device_instructions: Vec<Line> = vec![
         "To play tracks, please select a device. ",
@@ -1509,7 +1568,7 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
           .add_modifier(Modifier::BOLD),
       )),
     );
-  f.render_widget(instructions, chunks[0]);
+  f.render_widget(instructions, instructions_area);
 
   let no_device_message = Span::raw("No devices found: Make sure a device is active");
 
@@ -1548,8 +1607,8 @@ pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
         .bg(app.user_config.theme.inactive)
         .add_modifier(Modifier::BOLD),
     )
-    .highlight_symbol(">> ");
-  f.render_stateful_widget(list, chunks[1], &mut state);
+    .highlight_symbol(Line::from("▶ ").style(Style::default().fg(app.user_config.theme.active)));
+  f.render_stateful_widget(list, list_area, &mut state);
 }
 
 pub fn draw_album_list(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
@@ -1729,10 +1788,10 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   );
 
   // Split into two sections: playlist list and info panel
-  let chunks = Layout::default()
-    .direction(Direction::Vertical)
-    .constraints([Constraint::Min(8), Constraint::Length(8)].as_ref())
-    .split(layout_chunk);
+  let [list_area, info_area] = layout_chunk.layout(&Layout::vertical([
+    Constraint::Min(8),
+    Constraint::Length(8),
+  ]));
 
   // Build discover options with status indicators
   let artists_mix_status = if app.discover_loading && app.discover_selected_index == 0 {
@@ -1818,11 +1877,10 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
         ))
         .border_style(get_color(highlight_state, app.user_config.theme)),
     )
-    .highlight_style(
-      get_color(highlight_state, app.user_config.theme).add_modifier(Modifier::BOLD),
-    );
+    .highlight_style(get_color(highlight_state, app.user_config.theme).add_modifier(Modifier::BOLD))
+    .highlight_symbol(Line::from("▶ ").style(get_color(highlight_state, app.user_config.theme)));
 
-  f.render_stateful_widget(list, chunks[0], &mut state);
+  f.render_stateful_widget(list, list_area, &mut state);
 
   // Info panel at bottom - context-sensitive help
   let info_lines = vec![
@@ -1891,7 +1949,7 @@ pub fn draw_discover(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
     )
     .wrap(Wrap { trim: true });
 
-  f.render_widget(info, chunks[1]);
+  f.render_widget(info, info_area);
 }
 
 pub fn draw_recently_played_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
@@ -1982,28 +2040,27 @@ fn draw_selectable_list<S>(
     .map(|i| ListItem::new(Span::raw(i.as_ref())))
     .collect();
 
-  //TODO
+  let block = Block::default()
+    .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
+    .title(Span::styled(
+      title,
+      get_color(highlight_state, app.user_config.theme),
+    ))
+    .border_style(get_color(highlight_state, app.user_config.theme));
+
   let list = List::new(lst_items)
-    .block(
-      Block::default()
-        .title(Span::styled(
-          title,
-          get_color(highlight_state, app.user_config.theme),
-        ))
-        .borders(Borders::ALL)
-        .border_style(get_color(highlight_state, app.user_config.theme)),
-    )
+    .block(block)
     .style(app.user_config.theme.base_style())
-    .highlight_style(
-      get_color(highlight_state, app.user_config.theme).add_modifier(Modifier::BOLD),
-    );
+    .highlight_style(get_color(highlight_state, app.user_config.theme).add_modifier(Modifier::BOLD))
+    .highlight_symbol(Line::from("▶ ").style(get_color(highlight_state, app.user_config.theme)));
   f.render_stateful_widget(list, layout_chunk, &mut state);
 }
 
 fn draw_dialog(f: &mut Frame<'_>, app: &App) {
   if let ActiveBlock::Dialog(_) = app.get_current_route().active_block {
     if let Some(playlist) = app.dialog.as_ref() {
-      let bounds = f.size();
+      let bounds = f.area();
       // maybe do this better
       let width = std::cmp::min(bounds.width - 2, 45);
       let height = 8;
@@ -2199,13 +2256,12 @@ fn draw_table(
 /// Draw the mandatory update prompt modal
 pub fn draw_update_prompt(f: &mut Frame<'_>, app: &App) {
   if let Some(update_info) = &app.update_available {
-    let bounds = f.size();
-    let width = std::cmp::min(bounds.width.saturating_sub(4), 60);
+    let width = std::cmp::min(f.area().width.saturating_sub(4), 60);
     let height = 9;
-    let left = (bounds.width.saturating_sub(width)) / 2;
-    let top = (bounds.height.saturating_sub(height)) / 2;
+    let rect = f
+      .area()
+      .centered(Constraint::Length(width), Constraint::Length(height));
 
-    let rect = Rect::new(left, top, width, height);
     f.render_widget(Clear, rect);
 
     let text = vec![
@@ -2265,13 +2321,12 @@ fn draw_sort_menu(f: &mut Frame<'_>, app: &App) {
     crate::sort::SortContext::RecentlyPlayed => &app.playlist_sort,
   };
 
-  let bounds = f.size();
-  let width = std::cmp::min(bounds.width.saturating_sub(4), 35);
+  let width = std::cmp::min(f.area().width.saturating_sub(4), 35);
   let height = (available_fields.len() + 4) as u16; // +4 for borders/padding
-  let left = (bounds.width.saturating_sub(width)) / 2;
-  let top = (bounds.height.saturating_sub(height)) / 2;
+  let rect = f
+    .area()
+    .centered(Constraint::Length(width), Constraint::Length(height));
 
-  let rect = Rect::new(left, top, width, height);
   f.render_widget(Clear, rect);
 
   // Build list items
@@ -2328,7 +2383,8 @@ fn draw_sort_menu(f: &mut Frame<'_>, app: &App) {
       Style::default()
         .fg(app.user_config.theme.active)
         .add_modifier(Modifier::BOLD),
-    );
+    )
+    .highlight_symbol(Line::from("▶ ").style(Style::default().fg(app.user_config.theme.active)));
 
   let mut state = ListState::default();
   state.select(Some(app.sort_menu_selected));
