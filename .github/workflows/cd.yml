@@ -57,6 +57,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y -qq pkg-config libssl-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libpipewire-0.3-dev libspa-0.2-dev libasound2-dev
 
+      - name: Install cargo-deb
+        if: runner.os == 'Linux'
+        run: cargo install cargo-deb --locked
+
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: brew install openssl@3 portaudio
@@ -82,6 +86,15 @@ jobs:
           cd ../../..
           shasum -a 256 $RELEASE_NAME.tar.gz > $RELEASE_NAME.tar.gz.sha256
 
+      - name: Package Debian (.deb)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo deb --no-build --target ${{ matrix.target }}
+          DEB_PATH=$(ls target/${{ matrix.target }}/debian/*.deb)
+          cp "$DEB_PATH" .
+          sha256sum "$(basename "$DEB_PATH")" > "$(basename "$DEB_PATH").sha256"
+
       - name: Package binary (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -101,6 +114,15 @@ jobs:
           path: |
             ${{ env.BINARY_NAME }}-${{ matrix.artifact_prefix }}.tar.gz
             ${{ env.BINARY_NAME }}-${{ matrix.artifact_prefix }}.tar.gz.sha256
+
+      - name: Upload artifact (Linux .deb)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.artifact_prefix }}-deb
+          path: |
+            *.deb
+            *.deb.sha256
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'

@@ -113,3 +113,11 @@ codegen-units = 1  # Better optimization
 lto = true         # Link-time optimization
 opt-level = "s"    # Prioritize small binary size
 strip = true       # Remove debug symbols
+
+[package.metadata.deb]
+maintainer = "LargeModGames <LargeModGames@gmail.com>"
+copyright = "2025, LargeModGames"
+license-file = ["LICENSE", "4"]
+depends = "$auto"
+section = "utils"
+priority = "optional"
