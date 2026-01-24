@@ -68,9 +68,9 @@ jobs:
       - name: Build release binary
         run: |
           if [ -z "${{ matrix.audio_features }}" ]; then
-            cargo build --release --target ${{ matrix.target }} --no-default-features --features telemetry,streaming
+            cargo build --release --target ${{ matrix.target }} --no-default-features --features telemetry,streaming,discord-rpc
           else
-            cargo build --release --target ${{ matrix.target }} --no-default-features --features telemetry,streaming,${{ matrix.audio_features }}
+            cargo build --release --target ${{ matrix.target }} --no-default-features --features telemetry,streaming,discord-rpc,${{ matrix.audio_features }}
           fi
         shell: bash
 
@@ -274,19 +274,19 @@ jobs:
         id: sha256
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          
+
           # SHA256 for the binary tarball
           BINARY_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/spotatui-linux-x86_64.tar.gz"
           SHA256_BINARY=$(curl -sL "$BINARY_URL" | sha256sum | awk '{print $1}')
           echo "sha256_binary=$SHA256_BINARY" >> $GITHUB_OUTPUT
           echo "Binary SHA256: $SHA256_BINARY"
-          
+
           # SHA256 for LICENSE
           LICENSE_URL="https://raw.githubusercontent.com/${{ github.repository }}/v${VERSION}/LICENSE"
           SHA256_LICENSE=$(curl -sL "$LICENSE_URL" | sha256sum | awk '{print $1}')
           echo "sha256_license=$SHA256_LICENSE" >> $GITHUB_OUTPUT
           echo "LICENSE SHA256: $SHA256_LICENSE"
-          
+
           # SHA256 for README.md
           README_URL="https://raw.githubusercontent.com/${{ github.repository }}/v${VERSION}/README.md"
           SHA256_README=$(curl -sL "$README_URL" | sha256sum | awk '{print $1}')
@@ -334,3 +334,15 @@ jobs:
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${{ steps.version.outputs.version }}"
           GIT_SSH_COMMAND='ssh -i ~/.ssh/aur -o IdentitiesOnly=yes' git push
+
+  publish-winget:
+    name: Publish to winget
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Submit to winget-pkgs
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: LargeModGames.spotatui
+          installers-regex: '-windows-x86_64\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}
