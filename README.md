@@ -107,7 +107,10 @@ You may be asked to re-authenticate with Spotify the first time.
 # Cargo (recommended)
 cargo install spotatui
 
-# Arch Linux (AUR)
+# Arch Linux (AUR) - pre-built binary (faster)
+yay -S spotatui-bin
+
+# Arch Linux (AUR) - build from source
 yay -S spotatui
 ```
 
