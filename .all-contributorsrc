@@ -78,6 +78,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "bodoque-01",
+      "name": "Sebastian Sarco",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63447579?v=4",
+      "profile": "https://github.com/bodoque-01",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
