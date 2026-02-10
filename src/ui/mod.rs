@@ -327,9 +327,33 @@ pub fn draw_library_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
 }
 
 pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
-  let playlist_items = match &app.playlists {
-    Some(p) => p.items.iter().map(|item| item.name.to_owned()).collect(),
-    None => vec![],
+  let display_items = app.get_playlist_display_items();
+
+  let playlist_items: Vec<String> = if app.playlist_folder_items.is_empty() {
+    // Fallback only when folder-aware items are not initialized yet
+    match &app.playlists {
+      Some(p) => p.items.iter().map(|item| item.name.to_owned()).collect(),
+      None => vec![],
+    }
+  } else {
+    display_items
+      .iter()
+      .map(|item| match item {
+        crate::app::PlaylistFolderItem::Folder(folder) => {
+          if folder.name.starts_with('\u{2190}') {
+            // Back entry (already has arrow prefix)
+            folder.name.clone()
+          } else {
+            format!("\u{1F4C1} {}", folder.name)
+          }
+        }
+        crate::app::PlaylistFolderItem::Playlist { index, .. } => app
+          .all_playlists
+          .get(*index)
+          .map(|p| p.name.clone())
+          .unwrap_or_else(|| "Unknown".to_string()),
+      })
+      .collect()
   };
 
   let current_route = app.get_current_route();

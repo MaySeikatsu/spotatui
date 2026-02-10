@@ -117,6 +117,11 @@ pub struct StreamingPlayer {
 
 #[allow(dead_code)]
 impl StreamingPlayer {
+  /// Get a reference to the librespot session (for API calls like rootlist)
+  pub fn session(&self) -> &Session {
+    &self.session
+  }
+
   /// Create a new streaming player using librespot-oauth for authentication
   ///
   /// This will check for cached credentials first, and if not found,

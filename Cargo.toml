@@ -58,6 +58,8 @@ librespot-core = { version = "0.8", optional = true }
 librespot-connect = { version = "0.8", optional = true }
 librespot-oauth = { version = "0.8", optional = true }
 librespot-metadata = { version = "0.8", optional = true }
+librespot-protocol = { version = "0.8", optional = true, default-features = false }
+protobuf = { version = "3.7", optional = true }
 futures = "0.3.31"
 
 [target.'cfg(all(target_os = "linux", not(target_env = "musl")))'.dependencies]
@@ -91,7 +93,7 @@ block2 = { version = "0.6", optional = true }
 [features]
 default = ["telemetry", "streaming", "audio-viz-cpal", "mpris", "macos-media", "discord-rpc"]
 telemetry = []
-streaming = ["librespot-core", "librespot-playback", "librespot-connect", "librespot-oauth", "librespot-metadata"]
+streaming = ["librespot-core", "librespot-playback", "librespot-connect", "librespot-oauth", "librespot-metadata", "librespot-protocol", "protobuf"]
 # Audio backend features
 alsa-backend = ["streaming", "librespot-playback/alsa-backend"]
 pulseaudio-backend = ["streaming", "librespot-playback/pulseaudio-backend"]
