@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.35.7] - 2026-02-10
+
+### Added
+
+- **Playlist Folder Navigation**: Playlist folders from your Spotify library are now displayed as a navigable hierarchy in the UI, with optimized background fetching and immediate folder structure rendering ([#92](https://github.com/LargeModGames/spotatui/pull/92))
+
+### Fixed
+
+- **Seek Was Completely Unusable**: Rapid seeking (`<`/`>` keys) would freeze the player, corrupt audio, cause looping glitches, and require Ctrl+C to kill. Fixed by throttling native seeks to 50ms and API seeks to 200ms, queueing pending seeks, and ignoring stale position events after seeking (thanks @El-Mundos - [#86](https://github.com/LargeModGames/spotatui/pull/86))
+- **MPRIS Position Tracking and Seeking**: Fixed relative seek calculation (was treating offset as absolute position), added `SetPosition` support for widgets using absolute positioning, and emit `Seeked` signals so external clients update their displays (thanks @El-Mundos - [#85](https://github.com/LargeModGames/spotatui/pull/85))
+- **MPRIS Shuffle and Loop Support**: MPRIS now advertises shuffle and loop status capabilities so desktop media controls and `playerctl` can toggle shuffle and repeat modes bidirectionally (thanks @El-Mundos - [#86](https://github.com/LargeModGames/spotatui/pull/86))
+- **Progress Reset on Resume**: Resuming playback on external devices no longer briefly flashes 0:00 before the API returns the real position (thanks @El-Mundos - [#86](https://github.com/LargeModGames/spotatui/pull/86))
+- **Seek Timing Bug**: Fixed a timing issue where queued API seeks didn't start the position-ignore window, causing the UI to jump back to stale positions during rapid seeks (thanks @El-Mundos - [#86](https://github.com/LargeModGames/spotatui/pull/86))
+- **Help Menu Closing App**: Dismissing the help menu no longer closes the entire application; it is now handled as a proper route (thanks @dpnova - [#89](https://github.com/LargeModGames/spotatui/pull/89))
+- **Playlist Folder Refresh Races**: Guarded against background refresh races and unified playlist resolution logic to prevent inconsistent folder state ([#92](https://github.com/LargeModGames/spotatui/pull/92))
+
+### Changed
+
+- **Dependency Updates**: Updated `clap` to 4.5.57 and `anyhow` to 1.0.101 ([#90](https://github.com/LargeModGames/spotatui/pull/90))
+
 ## [0.35.6] - 2026-02-07
 
 ### Added
