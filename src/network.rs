@@ -2499,8 +2499,72 @@ impl Network {
   }
 
   async fn get_current_user_playlists(&mut self) {
-    // Fetch all playlists (all pages) and populate folder hierarchy
-    self.get_all_playlists_and_folders().await;
+    // Step 1: Fetch ONLY the first page (single API call, fast)
+    let first_page = match self
+      .spotify
+      .current_user_playlists_manual(Some(self.large_search_limit), None)
+      .await
+    {
+      Ok(p) => p,
+      Err(e) => {
+        self.handle_error(anyhow!(e)).await;
+        return;
+      }
+    };
+
+    let total = first_page.total;
+    let first_page_count = first_page.items.len() as u32;
+
+    // Step 2: Immediately populate app state with first page (flat list, no folders yet)
+    {
+      let mut app = self.app.lock().await;
+      app.all_playlists = first_page.items.clone();
+      app.playlists = Some(first_page);
+      app.playlist_folder_items = app
+        .all_playlists
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| PlaylistFolderItem::Playlist {
+          index: idx,
+          current_id: 0,
+        })
+        .collect();
+      app.current_playlist_folder_id = 0;
+      app.selected_playlist_index = Some(0);
+    }
+
+    // Step 3: Spawn background task to fetch remaining pages + rootlist folders
+    let spotify = self.spotify.clone();
+    let app = self.app.clone();
+    let limit = self.large_search_limit;
+    #[cfg(feature = "streaming")]
+    {
+      let streaming_player = self.streaming_player.clone();
+      tokio::spawn(async move {
+        Self::fetch_remaining_playlists_and_folders_task(
+          spotify,
+          app,
+          limit,
+          first_page_count,
+          total,
+          streaming_player,
+        )
+        .await;
+      });
+    }
+    #[cfg(not(feature = "streaming"))]
+    {
+      tokio::spawn(async move {
+        Self::fetch_remaining_playlists_and_folders_task(
+          spotify,
+          app,
+          limit,
+          first_page_count,
+          total,
+        )
+        .await;
+      });
+    }
   }
 
   /// Fetch all user playlists across all pages, then attempt to fetch
@@ -2540,7 +2604,7 @@ impl Network {
 
     // Step 2: Try to get folder hierarchy from rootlist (streaming only)
     #[cfg(feature = "streaming")]
-    let folder_nodes = self.fetch_rootlist_folders().await;
+    let folder_nodes = fetch_rootlist_folders(&self.streaming_player).await;
 
     #[cfg(not(feature = "streaming"))]
     let folder_nodes: Option<Vec<PlaylistFolderNode>> = None;
@@ -2569,38 +2633,74 @@ impl Network {
     app.selected_playlist_index = Some(0);
   }
 
-  /// Fetch folder hierarchy from Spotify's rootlist API (streaming feature only).
-  /// Returns parsed folder nodes, or None if unavailable.
-  #[cfg(feature = "streaming")]
-  async fn fetch_rootlist_folders(&self) -> Option<Vec<PlaylistFolderNode>> {
-    let player = self.streaming_player.as_ref()?;
-    let session = player.session();
+  /// Background task: fetch remaining playlist pages and rootlist folders,
+  /// then update app state with the complete folder hierarchy.
+  async fn fetch_remaining_playlists_and_folders_task(
+    spotify: AuthCodeSpotify,
+    app: Arc<Mutex<App>>,
+    limit: u32,
+    first_page_count: u32,
+    total: u32,
+    #[cfg(feature = "streaming")] streaming_player: Option<Arc<StreamingPlayer>>,
+  ) {
+    let max_playlists: u32 = 10_000;
 
-    // Request the full rootlist
-    let bytes = match session.spclient().get_rootlist(0, Some(100_000)).await {
-      Ok(b) => b,
-      Err(e) => {
-        eprintln!("Failed to fetch rootlist: {}", e);
-        return None;
+    // Fetch remaining playlist pages
+    let remaining_playlists_fut = async {
+      let mut remaining = Vec::new();
+      let mut offset = first_page_count;
+      while offset < total && offset < max_playlists {
+        match spotify
+          .current_user_playlists_manual(Some(limit), Some(offset))
+          .await
+        {
+          Ok(page) => {
+            let items_count = page.items.len() as u32;
+            remaining.extend(page.items);
+            if items_count < limit {
+              break;
+            }
+            offset += items_count;
+          }
+          Err(_) => break,
+        }
+        tokio::task::yield_now().await;
       }
+      remaining
     };
 
-    // Parse the protobuf response
-    use protobuf::Message;
-    let selected: librespot_protocol::playlist4_external::SelectedListContent =
-      match Message::parse_from_bytes(&bytes) {
-        Ok(s) => s,
-        Err(e) => {
-          eprintln!("Failed to parse rootlist protobuf: {}", e);
-          return None;
-        }
-      };
+    // Fetch rootlist folders concurrently with remaining pages (streaming only)
+    #[cfg(feature = "streaming")]
+    let (remaining_playlists, folder_nodes) = tokio::join!(
+      remaining_playlists_fut,
+      fetch_rootlist_folders(&streaming_player),
+    );
 
-    let contents = selected.contents.as_ref()?;
-    let items = &contents.items;
+    #[cfg(not(feature = "streaming"))]
+    let remaining_playlists = remaining_playlists_fut.await;
+    #[cfg(not(feature = "streaming"))]
+    let folder_nodes: Option<Vec<PlaylistFolderNode>> = None;
 
-    // Parse URIs into folder tree using start-group/end-group markers
-    Some(parse_rootlist_items(items))
+    // Update app state with complete data
+    let mut app = app.lock().await;
+    app.all_playlists.extend(remaining_playlists);
+
+    let folder_items = if let Some(ref nodes) = folder_nodes {
+      structurize_playlist_folders(nodes, &app.all_playlists)
+    } else {
+      app
+        .all_playlists
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| PlaylistFolderItem::Playlist {
+          index: idx,
+          current_id: 0,
+        })
+        .collect()
+    };
+
+    app.playlist_folder_nodes = folder_nodes;
+    app.playlist_folder_items = folder_items;
   }
 
   async fn get_recently_played(&mut self) {
@@ -3167,6 +3267,43 @@ impl Network {
       crate::app::ActiveBlock::TrackTable,
     );
   }
+}
+
+/// Fetch folder hierarchy from Spotify's rootlist API (streaming feature only).
+/// Standalone function usable from spawned background tasks.
+/// Returns parsed folder nodes, or None if unavailable.
+#[cfg(feature = "streaming")]
+async fn fetch_rootlist_folders(
+  streaming_player: &Option<Arc<StreamingPlayer>>,
+) -> Option<Vec<PlaylistFolderNode>> {
+  let player = streaming_player.as_ref()?;
+  let session = player.session();
+
+  // Request the full rootlist
+  let bytes = match session.spclient().get_rootlist(0, Some(100_000)).await {
+    Ok(b) => b,
+    Err(e) => {
+      eprintln!("Failed to fetch rootlist: {}", e);
+      return None;
+    }
+  };
+
+  // Parse the protobuf response
+  use protobuf::Message;
+  let selected: librespot_protocol::playlist4_external::SelectedListContent =
+    match Message::parse_from_bytes(&bytes) {
+      Ok(s) => s,
+      Err(e) => {
+        eprintln!("Failed to parse rootlist protobuf: {}", e);
+        return None;
+      }
+    };
+
+  let contents = selected.contents.as_ref()?;
+  let items = &contents.items;
+
+  // Parse URIs into folder tree using start-group/end-group markers
+  Some(parse_rootlist_items(items))
 }
 
 /// Parse rootlist item URIs into a tree of PlaylistFolderNodes.
