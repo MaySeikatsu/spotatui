@@ -54,7 +54,7 @@ use backtrace::Backtrace;
 use banner::BANNER;
 use clap::{Arg, Command as ClapApp};
 use clap_complete::{generate, Shell};
-use config::ClientConfig;
+use config::{ClientConfig, NCSPOT_CLIENT_ID};
 use crossterm::{
   cursor::MoveTo,
   event::{DisableMouseCapture, EnableMouseCapture},
@@ -67,7 +67,7 @@ use ratatui::backend::Backend;
 use redirect_uri::redirect_uri_web_server;
 use rspotify::{
   prelude::*,
-  {AuthCodeSpotify, Config, Credentials, OAuth, Token},
+  {AuthCodePkceSpotify, Config, Credentials, OAuth, Token},
 };
 use std::{
   cmp::{max, min},
@@ -326,7 +326,7 @@ fn update_mpris_metadata(
 }
 
 // Manual token cache helpers since rspotify's built-in caching isn't working
-async fn save_token_to_file(spotify: &AuthCodeSpotify, path: &PathBuf) -> Result<()> {
+async fn save_token_to_file(spotify: &AuthCodePkceSpotify, path: &PathBuf) -> Result<()> {
   let token_lock = spotify.token.lock().await.expect("Failed to lock token");
   if let Some(ref token) = *token_lock {
     let token_json = serde_json::to_string_pretty(token)?;
@@ -336,7 +336,7 @@ async fn save_token_to_file(spotify: &AuthCodeSpotify, path: &PathBuf) -> Result
   Ok(())
 }
 
-async fn load_token_from_file(spotify: &AuthCodeSpotify, path: &PathBuf) -> Result<bool> {
+async fn load_token_from_file(spotify: &AuthCodePkceSpotify, path: &PathBuf) -> Result<bool> {
   if !path.exists() {
     return Ok(false);
   }
@@ -350,6 +350,115 @@ async fn load_token_from_file(spotify: &AuthCodeSpotify, path: &PathBuf) -> Resu
 
   println!("Found cached authentication token");
   Ok(true)
+}
+
+fn token_cache_path_for_client(base_path: &PathBuf, client_id: &str) -> PathBuf {
+  let suffix = &client_id[..8.min(client_id.len())];
+  let stem = base_path
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or("spotify_token_cache");
+  let file_name = format!("{}_{}.json", stem, suffix);
+  base_path.with_file_name(file_name)
+}
+
+fn redirect_uri_for_client(client_config: &ClientConfig, client_id: &str) -> String {
+  if client_id == NCSPOT_CLIENT_ID {
+    "http://127.0.0.1:8989/login".to_string()
+  } else {
+    client_config.get_redirect_uri()
+  }
+}
+
+fn auth_port_from_redirect_uri(redirect_uri: &str) -> u16 {
+  redirect_uri
+    .split(':')
+    .nth(2)
+    .and_then(|v| v.split('/').next())
+    .and_then(|v| v.parse::<u16>().ok())
+    .unwrap_or(8888)
+}
+
+fn build_pkce_spotify_client(
+  client_id: &str,
+  redirect_uri: String,
+  cache_path: PathBuf,
+) -> AuthCodePkceSpotify {
+  let creds = Credentials::new_pkce(client_id);
+  let oauth = OAuth {
+    redirect_uri,
+    scopes: SCOPES.iter().map(|s| s.to_string()).collect(),
+    ..Default::default()
+  };
+  let config = Config {
+    cache_path,
+    ..Default::default()
+  };
+  AuthCodePkceSpotify::with_config(creds, oauth, config)
+}
+
+async fn ensure_auth_token(
+  spotify: &mut AuthCodePkceSpotify,
+  token_cache_path: &PathBuf,
+  auth_port: u16,
+) -> Result<()> {
+  let needs_auth = match load_token_from_file(spotify, token_cache_path).await {
+    Ok(true) => false,
+    Ok(false) => {
+      println!("No cached token found, need to authenticate");
+      true
+    }
+    Err(e) => {
+      println!("Failed to read token cache: {}", e);
+      true
+    }
+  };
+
+  if needs_auth {
+    let auth_url = spotify.get_authorize_url(None)?;
+
+    println!("\nAttempting to open this URL in your browser:");
+    println!("{}\n", auth_url);
+
+    if let Err(e) = open::that(&auth_url) {
+      println!("Failed to open browser automatically: {}", e);
+      println!("Please manually open the URL above in your browser.");
+    }
+
+    println!(
+      "Waiting for authorization callback on http://127.0.0.1:{}...\n",
+      auth_port
+    );
+
+    match redirect_uri_web_server(auth_port) {
+      Ok(url) => {
+        if let Some(code) = spotify.parse_response_code(&url) {
+          spotify.request_token(&code).await?;
+          save_token_to_file(spotify, token_cache_path).await?;
+          println!("✓ Successfully authenticated with Spotify!");
+        } else {
+          return Err(anyhow!(
+            "Failed to parse authorization code from callback URL"
+          ));
+        }
+      }
+      Err(()) => {
+        println!("Starting webserver failed. Continuing with manual authentication");
+        println!("Please open this URL in your browser: {}", auth_url);
+        println!("Enter the URL you were redirected to: ");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if let Some(code) = spotify.parse_response_code(&input) {
+          spotify.request_token(&code).await?;
+          save_token_to_file(spotify, token_cache_path).await?;
+        } else {
+          return Err(anyhow!("Failed to parse authorization code from input URL"));
+        }
+      }
+    }
+  }
+
+  Ok(())
 }
 
 #[cfg(all(target_os = "linux", feature = "streaming"))]
@@ -489,7 +598,22 @@ of the app. Beware that this comes at a CPU cost!",
   user_config.load_config()?;
   let initial_shuffle_enabled = user_config.behavior.shuffle_enabled;
 
+  if let Some(tick_rate) = matches
+    .get_one::<String>("tick-rate")
+    .and_then(|tick_rate| tick_rate.parse().ok())
+  {
+    if tick_rate >= 1000 {
+      panic!("Tick rate must be below 1000");
+    } else {
+      user_config.behavior.tick_rate_milliseconds = tick_rate;
+    }
+  }
+
+  let mut client_config = ClientConfig::new();
+  client_config.load_config()?;
+
   // Prompt for global song count opt-in if missing (only for interactive TUI, not CLI)
+  // Keep this after client setup so first-run UX asks for auth mode first.
   if matches.subcommand_name().is_none() {
     let config_paths_check = match &user_config.path_to_config {
       Some(path) => path,
@@ -501,10 +625,8 @@ of the app. Beware that this comes at a CPU cost!",
 
     let should_prompt = if config_paths_check.config_file_path.exists() {
       let config_string = fs::read_to_string(&config_paths_check.config_file_path)?;
-      // Prompt if file is empty OR doesn't mention the setting
       config_string.trim().is_empty() || !config_string.contains("enable_global_song_count")
     } else {
-      // For existing users (have client.yml but no config.yml), prompt them
       let client_yml_path = config_paths_check
         .config_file_path
         .parent()
@@ -531,7 +653,6 @@ of the app. Beware that this comes at a CPU cost!",
       let enable = input.is_empty() || input == "y" || input == "yes";
       user_config.behavior.enable_global_song_count = enable;
 
-      // Save the choice to config
       let config_yml = if config_paths_check.config_file_path.exists() {
         fs::read_to_string(&config_paths_check.config_file_path).unwrap_or_default()
       } else {
@@ -568,101 +689,70 @@ of the app. Beware that this comes at a CPU cost!",
     }
   }
 
-  if let Some(tick_rate) = matches
-    .get_one::<String>("tick-rate")
-    .and_then(|tick_rate| tick_rate.parse().ok())
-  {
-    if tick_rate >= 1000 {
-      panic!("Tick rate must be below 1000");
-    } else {
-      user_config.behavior.tick_rate_milliseconds = tick_rate;
-    }
-  }
-
-  let mut client_config = ClientConfig::new();
-  client_config.load_config()?;
-
   let config_paths = client_config.get_or_build_paths()?;
-
-  // Start authorization with spotify
-  let creds = Credentials::new(&client_config.client_id, &client_config.client_secret);
-
-  let oauth = OAuth {
-    redirect_uri: client_config.get_redirect_uri(),
-    scopes: SCOPES.iter().map(|s| s.to_string()).collect(),
-    ..Default::default()
-  };
-
-  let config = Config {
-    cache_path: config_paths.token_cache_path.clone(),
-    ..Default::default()
-  };
-
-  let mut spotify = AuthCodeSpotify::with_config(creds, oauth, config);
-
-  let config_port = client_config.get_port();
-
-  // Try to load token from our manual cache
-  let needs_auth = match load_token_from_file(&spotify, &config_paths.token_cache_path).await {
-    Ok(true) => false,
-    Ok(false) => {
-      println!("No cached token found, need to authenticate");
-      true
+  let mut client_candidates = vec![client_config.client_id.clone()];
+  if let Some(fallback_id) = client_config.fallback_client_id.clone() {
+    if fallback_id != client_config.client_id {
+      client_candidates.push(fallback_id);
     }
-    Err(e) => {
-      println!("Failed to read token cache: {}", e);
-      true
-    }
-  };
+  }
 
-  if needs_auth {
-    // If token is not in cache, get it from web flow
-    // Get the authorization URL first
-    let auth_url = spotify.get_authorize_url(false)?;
+  let mut spotify = None;
+  let mut selected_redirect_uri = client_config.get_redirect_uri();
+  let mut last_auth_error = None;
 
-    // Try to open the URL in the browser
-    println!("\nAttempting to open this URL in your browser:");
-    println!("{}\n", auth_url);
+  for (index, client_id) in client_candidates.iter().enumerate() {
+    let token_cache_path = token_cache_path_for_client(&config_paths.token_cache_path, client_id);
+    let redirect_uri = redirect_uri_for_client(&client_config, client_id);
+    let auth_port = auth_port_from_redirect_uri(&redirect_uri);
+    let mut candidate =
+      build_pkce_spotify_client(client_id, redirect_uri.clone(), token_cache_path.clone());
 
-    if let Err(e) = open::that(&auth_url) {
-      println!("Failed to open browser automatically: {}", e);
-      println!("Please manually open the URL above in your browser.");
-    }
+    let auth_result = ensure_auth_token(&mut candidate, &token_cache_path, auth_port).await;
 
-    println!(
-      "Waiting for authorization callback on http://127.0.0.1:{}...\n",
-      config_port
-    );
-
-    match redirect_uri_web_server(&mut spotify, config_port) {
-      Ok(url) => {
-        if let Some(code) = spotify.parse_response_code(&url) {
-          spotify.request_token(&code).await?;
-          // Write the token to our manual cache
-          save_token_to_file(&spotify, &config_paths.token_cache_path).await?;
-          println!("✓ Successfully authenticated with Spotify!");
+    match auth_result {
+      Ok(()) => {
+        if let Err(e) = candidate.me().await {
+          last_auth_error = Some(anyhow!(e));
+          if index + 1 < client_candidates.len() {
+            println!(
+              "Authentication with client {} failed after token setup, trying fallback client...",
+              client_id
+            );
+            continue;
+          }
         } else {
-          return Err(anyhow!(
-            "Failed to parse authorization code from callback URL"
-          ));
+          if *client_id == NCSPOT_CLIENT_ID {
+            println!(
+              "Using ncspot shared client ID. If it breaks in the future, configure fallback_client_id in client.yml."
+            );
+          } else {
+            println!("Using fallback client ID {}", client_id);
+          }
+          client_config.client_id = client_id.clone();
+          selected_redirect_uri = redirect_uri;
+          spotify = Some(candidate);
+          break;
         }
       }
-      Err(()) => {
-        println!("Starting webserver failed. Continuing with manual authentication");
-        println!("Please open this URL in your browser: {}", auth_url);
-        println!("Enter the URL you were redirected to: ");
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        if let Some(code) = spotify.parse_response_code(&input) {
-          spotify.request_token(&code).await?;
-          // Write the token to our manual cache
-          save_token_to_file(&spotify, &config_paths.token_cache_path).await?;
-        } else {
-          return Err(anyhow!("Failed to parse authorization code from input URL"));
+      Err(e) => {
+        last_auth_error = Some(e);
+        if index + 1 < client_candidates.len() {
+          println!(
+            "Authentication with client {} failed, trying fallback client...",
+            client_id
+          );
+          continue;
         }
       }
     }
   }
+
+  let spotify = if let Some(spotify) = spotify {
+    spotify
+  } else {
+    return Err(last_auth_error.unwrap_or_else(|| anyhow!("Authentication failed")));
+  };
 
   // Verify that we have a valid token before proceeding
   let token_lock = spotify.token.lock().await.expect("Failed to lock token");
@@ -713,7 +803,7 @@ of the app. Beware that this comes at a CPU cost!",
       };
 
       let client_id = client_config.client_id.clone();
-      let redirect_uri = client_config.get_redirect_uri();
+      let redirect_uri = selected_redirect_uri.clone();
 
       let mut init_handle = tokio::spawn(async move {
         player::StreamingPlayer::new(&client_id, &redirect_uri, streaming_config).await

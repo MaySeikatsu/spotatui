@@ -23,7 +23,7 @@ use rspotify::{
     Market, PlayableItem,
   },
   prelude::*,
-  AuthCodeSpotify,
+  AuthCodePkceSpotify,
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::{json, Value};
@@ -124,7 +124,7 @@ pub enum IoEvent {
 }
 
 pub struct Network {
-  pub spotify: AuthCodeSpotify,
+  pub spotify: AuthCodePkceSpotify,
   large_search_limit: u32,
   small_search_limit: u32,
   pub client_config: ClientConfig,
@@ -157,7 +157,7 @@ const SPOTIFY_API_MIN_INTERVAL: Duration = Duration::from_millis(250);
 impl Network {
   #[cfg(feature = "streaming")]
   pub fn new(
-    spotify: AuthCodeSpotify,
+    spotify: AuthCodePkceSpotify,
     client_config: ClientConfig,
     app: &Arc<Mutex<App>>,
     streaming_player: Option<Arc<StreamingPlayer>>,
@@ -173,7 +173,11 @@ impl Network {
   }
 
   #[cfg(not(feature = "streaming"))]
-  pub fn new(spotify: AuthCodeSpotify, client_config: ClientConfig, app: &Arc<Mutex<App>>) -> Self {
+  pub fn new(
+    spotify: AuthCodePkceSpotify,
+    client_config: ClientConfig,
+    app: &Arc<Mutex<App>>,
+  ) -> Self {
     Network {
       spotify,
       large_search_limit: 50,
@@ -471,6 +475,16 @@ impl Network {
     text.contains("429") || text.contains("Too Many Requests") || text.contains("Too many requests")
   }
 
+  fn is_transient_network_error(e: &anyhow::Error) -> bool {
+    let text = e.to_string().to_lowercase();
+    text.contains("error sending request for url")
+      || text.contains("connection reset")
+      || text.contains("connection refused")
+      || text.contains("timed out")
+      || text.contains("temporary failure")
+      || text.contains("dns")
+  }
+
   async fn pace_spotify_api_call() {
     let pacing_lock = SPOTIFY_API_PACING.get_or_init(|| Mutex::new(None));
     let mut last_request_started_at = pacing_lock.lock().await;
@@ -486,7 +500,7 @@ impl Network {
   }
 
   async fn spotify_api_request_json_for(
-    spotify: &AuthCodeSpotify,
+    spotify: &AuthCodePkceSpotify,
     method: Method,
     path: &str,
     query: &[(&str, String)],
@@ -524,7 +538,18 @@ impl Network {
         request = request.json(&payload);
       }
 
-      let response = request.send().await?;
+      let response = match request.send().await {
+        Ok(response) => response,
+        Err(e) => {
+          if attempt + 1 < max_attempts && (e.is_connect() || e.is_timeout() || e.is_request()) {
+            let backoff_secs = 1 + u64::from(attempt);
+            tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+            attempt += 1;
+            continue;
+          }
+          return Err(anyhow!("Spotify API request failed: {}", e));
+        }
+      };
       if response.status().is_success() {
         let response_body = response.text().await?;
         if response_body.trim().is_empty() {
@@ -665,7 +690,7 @@ impl Network {
   }
 
   async fn spotify_get_typed_compat_for<T: DeserializeOwned>(
-    spotify: &AuthCodeSpotify,
+    spotify: &AuthCodePkceSpotify,
     path: &str,
     query: &[(&str, String)],
   ) -> anyhow::Result<T> {
@@ -914,8 +939,9 @@ impl Network {
       Err(e) => {
         app.is_fetching_current_playback = false;
 
-        let error_text = e.to_string();
-        if error_text.contains("429") || error_text.contains("Too Many Requests") {
+        let err = anyhow!(e);
+
+        if Self::is_rate_limited_error(&err) {
           app.status_message = Some(
             "Spotify rate limit hit. Retrying automatically; please wait a few seconds."
               .to_string(),
@@ -925,8 +951,18 @@ impl Network {
           return;
         }
 
+        if Self::is_transient_network_error(&err) {
+          app.status_message = Some(
+            "Temporary Spotify network error while polling playback; retrying automatically."
+              .to_string(),
+          );
+          app.status_message_expires_at = Some(Instant::now() + Duration::from_secs(5));
+          app.instant_since_last_current_playback_poll = Instant::now();
+          return;
+        }
+
         drop(app); // Release lock before error handler
-        self.handle_error(anyhow!(e)).await;
+        self.handle_error(err).await;
         return;
       }
     }
@@ -1723,7 +1759,7 @@ impl Network {
   /// This loads all remaining pages that haven't been loaded yet
   /// Runs as a separate async task to avoid blocking other operations
   async fn prefetch_all_saved_tracks_task(
-    spotify: AuthCodeSpotify,
+    spotify: AuthCodePkceSpotify,
     app: Arc<Mutex<App>>,
     large_search_limit: u32,
   ) {
@@ -1785,7 +1821,7 @@ impl Network {
   /// Pre-fetch all tracks from a playlist in background
   /// Runs as a separate async task to avoid blocking other operations
   async fn prefetch_all_playlist_tracks_task(
-    spotify: AuthCodeSpotify,
+    spotify: AuthCodePkceSpotify,
     app: Arc<Mutex<App>>,
     large_search_limit: u32,
     playlist_id: PlaylistId<'static>,
@@ -2956,7 +2992,7 @@ impl Network {
   /// Background task: fetch remaining playlist pages and rootlist folders,
   /// then update app state with the complete folder hierarchy.
   async fn fetch_remaining_playlists_and_folders_task(
-    spotify: AuthCodeSpotify,
+    spotify: AuthCodePkceSpotify,
     app: Arc<Mutex<App>>,
     limit: u32,
     first_page_count: u32,

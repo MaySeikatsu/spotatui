@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.36.0] - 2026-02-13
+
+### Added
+
+- **First-Run Auth Mode Selection**: New users now choose between two setup paths during `client.yml` creation: (1) use the shared ncspot client ID, or (2) use ncspot with a user-provided fallback client ID.
+- **Automatic OAuth Client Fallback**: If authentication or profile verification fails with the primary client ID, spotatui now retries automatically with `fallback_client_id` when configured.
+- **Client-Specific Token Caches**: OAuth tokens are now stored per client ID to avoid collisions when switching between primary and fallback credentials.
+- **Spotify API Compatibility Layer**: Added a raw request/normalization path for Spotify's February 2026 payload changes so responses can still map into existing models.
+
+### Changed
+
+- **Authentication Flow Migrated to PKCE**: spotatui now authenticates with `AuthCodePkceSpotify` for better compatibility with current Spotify client-ID-based flows.
+- **Setup Prompt Order**: On first launch, global song counter opt-in is now prompted after client-ID setup (option 1/2), matching the onboarding sequence.
+- **ncspot Redirect URI Handling**: The shared ncspot client path now uses its expected redirect URI and callback port (`http://127.0.0.1:8989/login`).
+
+### Fixed
+
+- **Spotify Feb 2026 Breaking API Changes**: Resolved multiple regressions for newly created/restricted apps, including missing-field deserialization failures (`tracks`, `track`, `followers`, `external_ids`, `available_markets`, and related shape changes).
+- **Discover Reliability**: Reworked Discover top tracks/artists mix loading to avoid removed endpoints and to degrade gracefully when recommendation endpoints are unavailable.
+- **Library/Follow Endpoint Migration**: Updated save/follow checks and mutations to use the new `/me/library` and `/me/library/contains` style flows for tracks, albums, shows, artists, and playlists.
+- **Startup/Discover 429 Handling**: Added Spotify rate-limit retries with `Retry-After` support, global API pacing, and non-fatal UI handling for transient 429 responses.
+- **Excess Startup API Pressure**: Reduced repeated liked-state checks on playback polling so idle startup no longer spams containment checks.
+
 ## [0.35.7] - 2026-02-10
 
 ### Added

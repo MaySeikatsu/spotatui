@@ -13,10 +13,14 @@ const CONFIG_DIR: &str = ".config";
 const APP_CONFIG_DIR: &str = "spotatui";
 const TOKEN_CACHE_FILE: &str = ".spotify_token_cache.json";
 const GITIGNORE_FILE: &str = ".gitignore";
+pub const NCSPOT_CLIENT_ID: &str = "d420a117a32841c2b3474932e49fb54b";
 
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClientConfig {
   pub client_id: String,
+  #[serde(default)]
+  pub fallback_client_id: Option<String>,
+  #[serde(default)]
   pub client_secret: String,
   pub device_id: Option<String>,
   // FIXME: port should be defined in `user_config` not in here
@@ -53,6 +57,7 @@ impl ClientConfig {
   pub fn new() -> ClientConfig {
     ClientConfig {
       client_id: "".to_string(),
+      fallback_client_id: None,
       client_secret: "".to_string(),
       device_id: None,
       port: None,
@@ -140,6 +145,7 @@ impl ClientConfig {
       let config_yml: ClientConfig = serde_yaml::from_str(&config_string)?;
 
       self.client_id = config_yml.client_id;
+      self.fallback_client_id = config_yml.fallback_client_id;
       self.client_secret = config_yml.client_secret;
       self.device_id = config_yml.device_id;
       self.port = config_yml.port;
@@ -157,35 +163,58 @@ impl ClientConfig {
         paths.config_file_path.display()
       );
 
-      println!("\nHow to get setup:\n");
+      println!("\nClient setup options:\n");
+      println!(
+        "  1) Use ncspot client ID (quick setup, may break if Spotify revokes shared access)"
+      );
+      println!("  2) Use ncspot client ID + your own fallback app ID (recommended for resilience)");
 
-      let instructions = [
-        "Go to the Spotify dashboard - https://developer.spotify.com/dashboard/applications",
-        "Click `Create app` and add your own name and description",
-        &format!(
-          "Add `http://127.0.0.1:{}/callback` to Redirect URIs",
+      let setup_option = ClientConfig::get_setup_option()?;
+
+      let (client_id, fallback_client_id) = match setup_option {
+        1 => {
+          println!("\nUsing ncspot redirect URI: http://127.0.0.1:8989/login");
+          (NCSPOT_CLIENT_ID.to_string(), None)
+        }
+        2 => {
+          println!("\nCreate your fallback Spotify app:\n");
+          let instructions = [
+            "Go to https://developer.spotify.com/dashboard/applications",
+            "Click `Create app` and add your own name and description",
+            &format!(
+              "Add `http://127.0.0.1:{}/callback` to Redirect URIs",
+              DEFAULT_PORT
+            ),
+          ];
+
+          let mut number = 1;
+          for item in instructions.iter() {
+            println!("  {}. {}", number, item);
+            number += 1;
+          }
+
+          let fallback = ClientConfig::get_client_key_from_input("Fallback Client ID")?;
+          (NCSPOT_CLIENT_ID.to_string(), Some(fallback))
+        }
+        _ => unreachable!(),
+      };
+
+      let port = if setup_option == 1 {
+        8989
+      } else {
+        let mut port = String::new();
+        println!(
+          "\nEnter port of fallback redirect uri (default {}): ",
           DEFAULT_PORT
-        ),
-        "You are now ready to authenticate with Spotify!",
-      ];
-
-      let mut number = 1;
-      for item in instructions.iter() {
-        println!("  {}. {}", number, item);
-        number += 1;
-      }
-
-      let client_id = ClientConfig::get_client_key_from_input("Client ID")?;
-      let client_secret = ClientConfig::get_client_key_from_input("Client Secret")?;
-
-      let mut port = String::new();
-      println!("\nEnter port of redirect uri (default {}): ", DEFAULT_PORT);
-      stdin().read_line(&mut port)?;
-      let port = port.trim().parse::<u16>().unwrap_or(DEFAULT_PORT);
+        );
+        stdin().read_line(&mut port)?;
+        port.trim().parse::<u16>().unwrap_or(DEFAULT_PORT)
+      };
 
       let config_yml = ClientConfig {
         client_id,
-        client_secret,
+        fallback_client_id,
+        client_secret: String::new(),
         device_id: None,
         port: Some(port),
         enable_streaming: default_streaming_enabled(),
@@ -200,6 +229,7 @@ impl ClientConfig {
       write!(new_config, "{}", content_yml)?;
 
       self.client_id = config_yml.client_id;
+      self.fallback_client_id = config_yml.fallback_client_id;
       self.client_secret = config_yml.client_secret;
       self.device_id = config_yml.device_id;
       self.port = config_yml.port;
@@ -230,6 +260,33 @@ impl ClientConfig {
           }
         }
       };
+    }
+  }
+
+  fn get_setup_option() -> Result<u8> {
+    let mut input = String::new();
+    const MAX_RETRIES: u8 = 5;
+    let mut retries = 0;
+
+    loop {
+      println!("\nChoose option (1 or 2): ");
+      stdin().read_line(&mut input)?;
+      let trimmed = input.trim();
+
+      match trimmed.parse::<u8>() {
+        Ok(1) | Ok(2) => return Ok(trimmed.parse::<u8>()?),
+        _ => {
+          println!("Invalid choice. Please enter 1 or 2.");
+          input.clear();
+          retries += 1;
+          if retries >= MAX_RETRIES {
+            return Err(Error::from(std::io::Error::other(format!(
+              "Maximum retries ({}) exceeded.",
+              MAX_RETRIES
+            ))));
+          }
+        }
+      }
     }
   }
 
