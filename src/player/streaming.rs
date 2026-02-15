@@ -59,6 +59,53 @@ const SPOTIFY_PLAYER_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
 /// spotify-player's redirect_uri - must match what's registered with their client_id
 const SPOTIFY_PLAYER_REDIRECT_URI: &str = "http://127.0.0.1:8989/login";
 
+fn request_streaming_oauth_credentials() -> Result<Credentials> {
+  println!("Streaming authentication required - opening browser...");
+
+  let client_builder = OAuthClientBuilder::new(
+    SPOTIFY_PLAYER_CLIENT_ID,
+    SPOTIFY_PLAYER_REDIRECT_URI,
+    STREAMING_SCOPES.to_vec(),
+  )
+  .open_in_browser();
+
+  let oauth_client = client_builder
+    .build()
+    .map_err(|e| anyhow!("Failed to build OAuth client: {:?}", e))?;
+
+  let token = oauth_client
+    .get_access_token()
+    .map_err(|e| anyhow!("OAuth authentication failed: {:?}", e))?;
+
+  Ok(Credentials::with_access_token(token.access_token))
+}
+
+fn clear_cached_streaming_credentials(cache_path: &Option<PathBuf>) {
+  let Some(credentials_path) = cache_path
+    .as_ref()
+    .map(|path| path.join("credentials.json"))
+  else {
+    return;
+  };
+
+  match std::fs::remove_file(&credentials_path) {
+    Ok(()) => {
+      println!(
+        "Cleared cached streaming credentials at {}",
+        credentials_path.display()
+      );
+    }
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+    Err(e) => {
+      eprintln!(
+        "Failed to clear cached streaming credentials at {}: {}",
+        credentials_path.display(),
+        e
+      );
+    }
+  }
+}
+
 /// Configuration for the streaming player
 #[derive(Clone, Debug)]
 pub struct StreamingConfig {
@@ -151,31 +198,13 @@ impl StreamingPlayer {
     let cache = Cache::new(cache_path.clone(), None, audio_cache_path, None)?;
 
     // Try to get credentials from cache first
-    let credentials = if let Some(cached_creds) = cache.credentials() {
-      println!("Using cached streaming credentials");
-      cached_creds
-    } else {
-      // Need to authenticate with librespot-oauth using builder pattern
-      println!("Streaming authentication required - opening browser...");
-
-      // Use spotify-player's client_id and redirect_uri for OAuth (works with librespot)
-      let client_builder = OAuthClientBuilder::new(
-        SPOTIFY_PLAYER_CLIENT_ID,
-        SPOTIFY_PLAYER_REDIRECT_URI,
-        STREAMING_SCOPES.to_vec(),
-      )
-      .open_in_browser();
-
-      let oauth_client = client_builder
-        .build()
-        .map_err(|e| anyhow!("Failed to build OAuth client: {:?}", e))?;
-
-      let token = oauth_client
-        .get_access_token()
-        .map_err(|e| anyhow!("OAuth authentication failed: {:?}", e))?;
-
-      Credentials::with_access_token(token.access_token)
-    };
+    let (mut credentials, mut used_cached_credentials) =
+      if let Some(cached_creds) = cache.credentials() {
+        println!("Using cached streaming credentials");
+        (cached_creds, true)
+      } else {
+        (request_streaming_oauth_credentials()?, false)
+      };
 
     // Create session configuration using spotify-player's client_id
     let session_config = SessionConfig {
@@ -263,27 +292,50 @@ Set SPOTATUI_STREAMING_AUDIO_DEVICE to select an output device, or SPOTATUI_STRE
       .filter(|&v| v > 0)
       .unwrap_or(30);
 
-    // Create Spirc (Spotify Connect controller)
-    let spirc_new = Spirc::new(
-      connect_config,
-      session.clone(),
-      credentials,
-      player.clone(),
-      mixer.clone(),
-    );
+    let mut retried_with_fresh_credentials = false;
 
-    let (spirc, spirc_task) = match timeout(Duration::from_secs(init_timeout_secs), spirc_new).await
-    {
-      Ok(Ok(result)) => result,
-      Ok(Err(e)) => {
-        println!("Spirc creation error: {:?}", e);
-        return Err(anyhow!("Failed to create Spirc: {:?}", e));
-      }
-      Err(_) => {
-        return Err(anyhow!(
-          "Spirc initialization timed out after {}s (set SPOTATUI_STREAMING_INIT_TIMEOUT_SECS to adjust)",
-          init_timeout_secs
-        ));
+    // Create Spirc (Spotify Connect controller)
+    let (spirc, spirc_task) = loop {
+      let spirc_new = Spirc::new(
+        connect_config.clone(),
+        session.clone(),
+        credentials,
+        player.clone(),
+        mixer.clone(),
+      );
+
+      match timeout(Duration::from_secs(init_timeout_secs), spirc_new).await {
+        Ok(Ok(result)) => break result,
+        Ok(Err(e)) if used_cached_credentials && !retried_with_fresh_credentials => {
+          println!(
+            "Cached streaming credentials failed ({:?}); retrying with a fresh OAuth login",
+            e
+          );
+          clear_cached_streaming_credentials(&cache_path);
+          credentials = request_streaming_oauth_credentials()?;
+          used_cached_credentials = false;
+          retried_with_fresh_credentials = true;
+        }
+        Ok(Err(e)) => {
+          println!("Spirc creation error: {:?}", e);
+          return Err(anyhow!("Failed to create Spirc: {:?}", e));
+        }
+        Err(_) if used_cached_credentials && !retried_with_fresh_credentials => {
+          println!(
+            "Spirc initialization with cached credentials timed out after {}s; retrying with a fresh OAuth login",
+            init_timeout_secs
+          );
+          clear_cached_streaming_credentials(&cache_path);
+          credentials = request_streaming_oauth_credentials()?;
+          used_cached_credentials = false;
+          retried_with_fresh_credentials = true;
+        }
+        Err(_) => {
+          return Err(anyhow!(
+            "Spirc initialization timed out after {}s (set SPOTATUI_STREAMING_INIT_TIMEOUT_SECS to adjust)",
+            init_timeout_secs
+          ));
+        }
       }
     };
 

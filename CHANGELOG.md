@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.36.2]
+
+### Added
+
+- **Vesper Theme Preset**: Added a new built-in `Vesper` theme preset ([#98](https://github.com/LargeModGames/spotatui/pull/98)).
+- **Playlist Track Management Actions**: Added flows to add tracks to playlists from track-table contexts and quick-add the currently playing track from anywhere (`W`) ([#99](https://github.com/LargeModGames/spotatui/pull/99)).
+- **Playlist Track Removal Dialog**: Added remove-from-playlist action (`x` in playlist track tables) with a confirmation dialog and vim-style `h`/`l` confirmation navigation ([#99](https://github.com/LargeModGames/spotatui/pull/99)).
+
+### Fixed
+
+- **Deterministic Duplicate Removal in Playlists**: Removing a track now targets only the selected occurrence by position instead of broadly deleting matching duplicates; when mutation payload safety cannot be guaranteed (for local/unavailable rows), spotatui now reports a clear status error instead of mutating the wrong rows ([#99](https://github.com/LargeModGames/spotatui/pull/99)).
+- **Recurring Spirc Startup Failures with Cached Streaming Credentials**: If Spirc initialization fails or times out while using cached streaming credentials, spotatui now clears stale `streaming_cache/credentials.json`, requests fresh streaming OAuth credentials, and retries initialization once before falling back.
+
+
 ## [0.36.1] - 2026-02-14
 
 ### Fixed
