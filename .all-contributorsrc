@@ -106,6 +106,16 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "nthpaul",
+      "name": "Paul",
+      "avatar_url": "https://avatars.githubusercontent.com/u/70828466?v=4",
+      "profile": "http://nthpaul.com",
+      "contributions": [
+        "design",
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
