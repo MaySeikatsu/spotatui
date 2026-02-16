@@ -2019,6 +2019,9 @@ async fn start_ui(
         ActiveBlock::UpdatePrompt => {
           ui::draw_update_prompt(f, &app);
         }
+        ActiveBlock::AnnouncementPrompt => {
+          ui::draw_announcement_prompt(f, &app);
+        }
         ActiveBlock::Settings => {
           ui::settings::draw_settings(f, &app);
         }
@@ -2066,7 +2069,21 @@ async fn start_ui(
         if current_active_block == ActiveBlock::Input {
           handlers::input_handler(key, &mut app);
         } else if key == app.user_config.keys.back {
-          if app.get_current_route().active_block != ActiveBlock::Input {
+          if app.get_current_route().active_block == ActiveBlock::AnnouncementPrompt {
+            if let Some(dismissed_id) = app.dismiss_active_announcement() {
+              app.user_config.mark_announcement_seen(dismissed_id);
+              if let Err(error) = app.user_config.save_config() {
+                app.handle_error(anyhow!(
+                  "Failed to persist dismissed announcement: {}",
+                  error
+                ));
+              }
+            }
+
+            if app.active_announcement.is_none() {
+              app.pop_navigation_stack();
+            }
+          } else if app.get_current_route().active_block != ActiveBlock::Input {
             // Go back through navigation stack when not in search input mode and exit the app if there are no more places to back to
 
             let pop_result = match app.pop_navigation_stack() {
@@ -2169,6 +2186,7 @@ async fn start_ui(
       if app.user_config.behavior.enable_global_song_count {
         app.dispatch(IoEvent::FetchGlobalSongCount);
       }
+      app.dispatch(IoEvent::FetchAnnouncements);
       app.help_docs_size = ui::help::get_help_docs(&app.user_config.keys).len() as u32;
 
       is_first_render = false;
@@ -2295,6 +2313,7 @@ async fn start_ui(
           ActiveBlock::Analysis => ui::audio_analysis::draw(f, &app),
           ActiveBlock::BasicView => ui::draw_basic_view(f, &app),
           ActiveBlock::UpdatePrompt => ui::draw_update_prompt(f, &app),
+          ActiveBlock::AnnouncementPrompt => ui::draw_announcement_prompt(f, &app),
           ActiveBlock::Settings => ui::settings::draw_settings(f, &app),
           _ => ui::draw_main_layout(f, &app),
         }
@@ -2334,7 +2353,21 @@ async fn start_ui(
         if current_active_block == ActiveBlock::Input {
           handlers::input_handler(key, &mut app);
         } else if key == app.user_config.keys.back {
-          if app.get_current_route().active_block != ActiveBlock::Input {
+          if app.get_current_route().active_block == ActiveBlock::AnnouncementPrompt {
+            if let Some(dismissed_id) = app.dismiss_active_announcement() {
+              app.user_config.mark_announcement_seen(dismissed_id);
+              if let Err(error) = app.user_config.save_config() {
+                app.handle_error(anyhow!(
+                  "Failed to persist dismissed announcement: {}",
+                  error
+                ));
+              }
+            }
+
+            if app.active_announcement.is_none() {
+              app.pop_navigation_stack();
+            }
+          } else if app.get_current_route().active_block != ActiveBlock::Input {
             let pop_result = match app.pop_navigation_stack() {
               Some(ref x) if x.id == RouteId::Search => app.pop_navigation_stack(),
               Some(x) => Some(x),
@@ -2416,6 +2449,7 @@ async fn start_ui(
       if app.user_config.behavior.enable_global_song_count {
         app.dispatch(IoEvent::FetchGlobalSongCount);
       }
+      app.dispatch(IoEvent::FetchAnnouncements);
       app.help_docs_size = ui::help::get_help_docs(&app.user_config.keys).len() as u32;
       is_first_render = false;
     }

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "announcements": [
+    {
+      "id": "welcome-remote-announcements",
+      "title": "Remote announcements are live",
+      "body": "You can publish new one-time messages by updating this file. Each announcement id is shown once per user.",
+      "level": "info",
+      "url": "https://github.com/LargeModGames/spotatui",
+      "starts_at": "2026-02-16T00:00:00Z",
+      "ends_at": null
+    }
+  ]
+}
