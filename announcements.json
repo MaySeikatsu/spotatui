@@ -2,9 +2,9 @@
   "version": 1,
   "announcements": [
     {
-      "id": "welcome-remote-announcements",
-      "title": "Remote announcements are live",
-      "body": "You can publish new one-time messages by updating this file. Each announcement id is shown once per user.",
+      "id": "2026-02-16-announcements-live",
+      "title": "Message from the maintainer",
+      "body": "Hey! I can now publish one-time announcements directly in spotatui so important updates reach you in-app. If you prefer not to see these, you can disable Remote Announcements in Settings any time.",
       "level": "info",
       "url": "https://github.com/LargeModGames/spotatui",
       "starts_at": "2026-02-16T00:00:00Z",
