@@ -106,7 +106,7 @@ You may be asked to re-authenticate with Spotify the first time.
 > **Important:** Spotify Premium is required for playback features (native streaming and Web API playback controls).
 
 ```bash
-# Homebrew (macOS/Linux)
+# Homebrew (macOS only)
 brew tap LargeModGames/spotatui
 brew install spotatui
 
